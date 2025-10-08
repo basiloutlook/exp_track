@@ -2,6 +2,31 @@ import { Share, Platform } from 'react-native';
 import { storageService } from './storage';
 
 export const googleSheetsService = {
+  /**
+   * Import data from a Google Sheet that has been published as CSV.
+   * csvUrl should be the published CSV link (see getInstructions below).
+   */
+  async importFromPublishedSheet(csvUrl: string, overwrite = true): Promise<void> {
+    try {
+      await storageService.importFromCSVUrl(csvUrl, overwrite);
+    } catch (error) {
+      console.error('Error importing from published sheet:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Import from an Apps Script Web App endpoint that returns JSON for the sheet.
+   * Use this when you deploy an Apps Script that reads the sheet and returns a JSON array.
+   */
+  async importFromAppsScript(jsonUrl: string, overwrite = true): Promise<void> {
+    try {
+      await storageService.importFromJsonUrl(jsonUrl, overwrite);
+    } catch (error) {
+      console.error('Error importing from Apps Script:', error);
+      throw error;
+    }
+  },
   async exportToCSV(): Promise<void> {
     try {
       const csv = await storageService.exportToCSV();
