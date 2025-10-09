@@ -1,11 +1,11 @@
 // utils/googleSheets.ts
 import { Share, Platform } from "react-native";
 
-/**
- * ⚙️ Configure your Apps Script Web App URL here.
- * Example: https://script.google.com/macros/s/AKfycbx1234abcd/exec
- */
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyukwDUpU3hMUbbtN_kRrymgwI90nch5kg8SkLvmCimxQlJOBKB39zwYRmPGaQ_KLDj/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzECRW6OknPxlHpHCMMZt4zXzCIxywN1BVHCefw-4qFEktcVrH4Sd8lJnVlyoLh6aJ4/exec";
+
+// Check if we're on localhost (development)
+const isDevelopment = typeof window !== 'undefined' && 
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 /**
  * Send a new expense to the Google Sheet through the Apps Script Web App.
@@ -19,6 +19,13 @@ export async function addExpenseToGoogleSheet(expense: {
   shop: string;
   paymentMode: string;
 }) {
+  // Skip Google Sheets sync on localhost due to CORS restrictions
+  if (isDevelopment) {
+    console.log('⚠️ Skipping Google Sheets sync on localhost (CORS restriction)');
+    console.log('📱 Google Sheets sync will work on mobile app/production');
+    return true; // Return success to avoid breaking the flow
+  }
+
   try {
     const payload = {
       date: expense.date,
@@ -30,10 +37,15 @@ export async function addExpenseToGoogleSheet(expense: {
       paymentMode: expense.paymentMode,
     };
 
-    const response = await fetch(WEB_APP_URL, {
+    console.log('📤 Sending to Google Sheets:', payload);
+
+    const response = await fetch(GOOGLE_SCRIPT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(payload),
+      redirect: 'follow',
     });
 
     const result = await response.json();
@@ -46,9 +58,11 @@ export async function addExpenseToGoogleSheet(expense: {
     return true;
   } catch (error) {
     console.error("❌ Error adding expense to Google Sheet:", error);
+    // Don't throw - let the app continue working with local storage
     return false;
   }
 }
+
 /**
  * Import data from a published Google Sheet (as CSV)
  */
@@ -68,7 +82,6 @@ export async function importFromPublishedSheet(
 
 /**
  * Import data from an Apps Script Web App that returns JSON.
- * This endpoint should return a JSON array of expense objects.
  */
 export async function importFromAppsScript(jsonUrl: string): Promise<any[]> {
   try {
@@ -85,7 +98,6 @@ export async function importFromAppsScript(jsonUrl: string): Promise<any[]> {
 
 /**
  * Export all expenses (CSV string) and share/download it.
- * Call this with a CSV string (from storage export).
  */
 export async function exportCSV(csv: string): Promise<void> {
   try {
@@ -112,7 +124,7 @@ export async function exportCSV(csv: string): Promise<void> {
 }
 
 /**
- * Instruction text for users on how to import/export data with Google Sheets
+ * Instruction text for users
  */
 export function getInstructions(): string {
   return `To import this data into Google Sheets:
