@@ -3,33 +3,41 @@ function doPost(e) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
     const data = JSON.parse(e.postData.contents);
 
-    // Append new row to Google Sheet
-    sheet.appendRow([
+    // ✅ Make sure all 10 fields are passed, even if empty
+    const row = [
       new Date(), // Timestamp
-      data.date, // Date
-      data.category, // Category
-      data.subCategory || "", // ✅ Sub Category
-      data.item, // Item
-      data.amount, // Amount
-      data.email, // Email Address
-      data.shop, // Shop/Site/Person name
-      data.paymentMode, // Mode of payment
-      Array.isArray(data.labels) ? data.labels.join(", ") : data.labels || "" // ✅ Labels
-    ]);
+      data.date || "", // Date
+      data.category || "", // Category
+      data.subCategory || "", // ✅ Sub Category (must be included)
+      data.item || "", // Item
+      data.amount || "", // Amount
+      data.email || "", // Email Address
+      data.shop || "", // Shop/Site/Person name
+      data.paymentMode || "", // Mode of payment
+      Array.isArray(data.labels)
+        ? data.labels.join(", ")
+        : data.labels || "" // Labels
+    ];
+
+    sheet.appendRow(row);
 
     return ContentService
-      .createTextOutput(JSON.stringify({
-        success: true,
-        message: "Expense added successfully"
-      }))
+      .createTextOutput(
+        JSON.stringify({
+          success: true,
+          message: "Expense added successfully",
+        })
+      )
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (error) {
     return ContentService
-      .createTextOutput(JSON.stringify({
-        success: false,
-        message: error.toString()
-      }))
+      .createTextOutput(
+        JSON.stringify({
+          success: false,
+          message: error.toString(),
+        })
+      )
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
