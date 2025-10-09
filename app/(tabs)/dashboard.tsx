@@ -14,6 +14,8 @@ import { Expense } from '@/types/expense';
 import { Download, Trash2, TrendingUp, Calendar, CreditCard } from 'lucide-react-native';
 import ExpenseList from '@/components/ExpenseList';
 import StatCard from '@/components/StatCard';
+import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
+
 
 export default function Dashboard() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -26,18 +28,34 @@ export default function Dashboard() {
   );
 
   const loadExpenses = async () => {
-    setIsLoading(true);
-    try {
-      const data = await storageService.getExpenses();
-      setExpenses(data.sort((a, b) =>
+  setIsLoading(true);
+  try {
+    // Try fetching from Google Sheets first
+    const sheetExpenses = await getExpensesFromGoogleSheet();
+    const hasSheetData = Array.isArray(sheetExpenses) && sheetExpenses.length > 0;
+
+    if (hasSheetData) {
+      console.log("✅ Loaded from Google Sheet:", sheetExpenses.length);
+      setExpenses(sheetExpenses.sort((a, b) =>
         new Date(b.date).getTime() - new Date(a.date).getTime()
       ));
-    } catch (error) {
-      Alert.alert('Error', 'Failed to load expenses');
-    } finally {
-      setIsLoading(false);
+    } else {
+      // Fallback to local storage
+      console.log("⚠️ Falling back to local storage");
+      const localData = await storageService.getExpenses();
+      const safeLocal = Array.isArray(localData) ? localData : [];
+      setExpenses(safeLocal.sort((a, b) =>
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      ));
     }
-  };
+  } catch (error) {
+    console.error("loadExpenses error:", error);
+    Alert.alert('Error', 'Failed to load expenses');
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   const handleDeleteExpense = async (id: string) => {
     Alert.alert(

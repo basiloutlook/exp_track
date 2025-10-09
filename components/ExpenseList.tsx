@@ -41,15 +41,16 @@ export default function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
           {expense.shopName && (
             <Text style={styles.expenseShop}>{expense.shopName}</Text>
           )}
-          {expense.labels.length > 0 && (
+          {(expense.labels?.length ?? 0) > 0 && (
             <View style={styles.labelsContainer}>
-              {expense.labels.map((label) => (
+              {(expense.labels ?? []).map((label) => (
                 <View key={label} style={styles.label}>
                   <Text style={styles.labelText}>{label}</Text>
                 </View>
               ))}
             </View>
           )}
+
           <TouchableOpacity
             style={styles.deleteButton}
             onPress={() => onDelete(expense.id)}>

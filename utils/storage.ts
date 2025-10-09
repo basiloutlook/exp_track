@@ -1,7 +1,6 @@
-// utils/storage.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Expense } from "@/types/expense";
-import { addExpenseToGoogleSheet } from "./googleSheets"; // ✅ Import this
+import { addExpenseToGoogleSheet } from "./googleSheets";
 
 const STORAGE_KEYS = {
   EXPENSES: "expenses",
@@ -9,54 +8,23 @@ const STORAGE_KEYS = {
   SETTINGS: "settings",
 };
 
-/**
- * Save data to AsyncStorage
- */
-export async function saveData<T>(key: string, data: T): Promise<void> {
+async function saveData<T>(key: string, data: T): Promise<void> {
   try {
-    const jsonValue = JSON.stringify(data);
-    await AsyncStorage.setItem(key, jsonValue);
+    await AsyncStorage.setItem(key, JSON.stringify(data));
   } catch (error) {
     console.error("Error saving data:", error);
   }
 }
 
-/**
- * Load data from AsyncStorage
- */
-export async function loadData<T>(key: string): Promise<T | null> {
+async function loadData<T>(key: string): Promise<T | null> {
   try {
-    const jsonValue = await AsyncStorage.getItem(key);
-    return jsonValue != null ? JSON.parse(jsonValue) : null;
+    const json = await AsyncStorage.getItem(key);
+    return json ? JSON.parse(json) : null;
   } catch (error) {
     console.error("Error loading data:", error);
     return null;
   }
 }
-
-/**
- * Remove a specific key from AsyncStorage
- */
-export async function removeData(key: string): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(key);
-  } catch (error) {
-    console.error("Error removing data:", error);
-  }
-}
-
-/**
- * Clear all app data from AsyncStorage
- */
-export async function clearAllData(): Promise<void> {
-  try {
-    await AsyncStorage.clear();
-  } catch (error) {
-    console.error("Error clearing data:", error);
-  }
-}
-
-export { STORAGE_KEYS };
 
 export const storageService = {
   async getUserEmail(): Promise<string | null> {
@@ -68,33 +36,58 @@ export const storageService = {
     await saveData(STORAGE_KEYS.USER, { email });
   },
 
-  /**
-   * Save expense locally + send to Google Sheets
-   */
+  // ✅ Save expense locally + send to Google Sheets
   async saveExpense(expense: Expense): Promise<void> {
     try {
-      // Save locally
       let expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES);
-      if (!Array.isArray(expenses)) {
-        expenses = [];
-      }
+      if (!Array.isArray(expenses)) expenses = [];
+
+      if (!expense.id) expense.id = Date.now().toString();
+
       expenses.push(expense);
       await saveData(STORAGE_KEYS.EXPENSES, expenses);
 
-      // ✅ Send to Google Sheet
-      await addExpenseToGoogleSheet({
-        date: expense.date,
-        category: expense.category,
-        item: expense.item,
-        amount: expense.amount,
-        email: expense.email,
-        shop: expense.shopName, // map to "shop"
-        paymentMode: expense.paymentMode,
-      });
-
+      await addExpenseToGoogleSheet(expense);
       console.log("✅ Expense saved locally & to Google Sheets");
     } catch (error) {
       console.error("❌ Error saving expense:", error);
+    }
+  },
+
+  async getExpenses(): Promise<Expense[]> {
+    try {
+      const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES);
+      return Array.isArray(expenses) ? expenses : [];
+    } catch (error) {
+      console.error("❌ Error loading expenses:", error);
+      return [];
+    }
+  },
+
+  async deleteExpense(id: string): Promise<void> {
+    try {
+      const expenses = await this.getExpenses();
+      const filtered = expenses.filter(e => e.id !== id);
+      await saveData(STORAGE_KEYS.EXPENSES, filtered);
+      console.log("🗑️ Expense deleted locally:", id);
+    } catch (error) {
+      console.error("❌ Error deleting expense:", error);
+    }
+  },
+
+  async exportToCSV(): Promise<string | null> {
+    try {
+      const expenses = await this.getExpenses();
+      if (expenses.length === 0) return null;
+
+      const header = "Date,Category,Item,Amount,Email,Shop,Payment Mode,Labels\n";
+      const rows = expenses.map(e =>
+        `${e.date},${e.category},${e.item},${e.amount},${e.email},${e.shopName},${e.paymentMode},"${e.labels.join(", ")}"`
+      );
+      return header + rows.join("\n");
+    } catch (error) {
+      console.error("❌ Error exporting expenses:", error);
+      return null;
     }
   },
 };

@@ -1,14 +1,14 @@
 export interface Expense {
   id: string;
-  email: string;
   date: string;
   category: string;
   item: string;
-  shopName: string;
   amount: number;
+  email: string;
+  shopName: string;
   paymentMode: string;
   labels: string[];
-  createdAt: string;
+  timestamp?: string;
 }
 
 export const CATEGORIES = [

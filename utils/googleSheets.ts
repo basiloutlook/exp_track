@@ -1,141 +1,72 @@
-// utils/googleSheets.ts
-import { Share, Platform } from "react-native";
+import { Expense } from '@/types/expense';
 
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzECRW6OknPxlHpHCMMZt4zXzCIxywN1BVHCefw-4qFEktcVrH4Sd8lJnVlyoLh6aJ4/exec";
-
-// Check if we're on localhost (development)
-const isDevelopment = typeof window !== 'undefined' && 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const GOOGLE_SHEET_URL =
+  'https://script.google.com/macros/s/AKfycbyhrdLiLU9jS3z8P4fGW1BB06vzL1LsrDojYUu-moez1zyP2Nyr6qxuacxaxzxYmNHj/exec';
 
 /**
- * Send a new expense to the Google Sheet through the Apps Script Web App.
+ * Fetch expenses from Google Sheets (via Apps Script Web App)
  */
-export async function addExpenseToGoogleSheet(expense: {
-  date: string;
-  category: string;
-  item: string;
-  amount: number;
-  email: string;
-  shop: string;
-  paymentMode: string;
-}) {
-  // Skip Google Sheets sync on localhost due to CORS restrictions
-  if (isDevelopment) {
-    console.log('⚠️ Skipping Google Sheets sync on localhost (CORS restriction)');
-    console.log('📱 Google Sheets sync will work on mobile app/production');
-    return true; // Return success to avoid breaking the flow
-  }
-
+// ✅ Get all expenses from Google Sheets
+export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
   try {
-    const payload = {
-      date: expense.date,
-      category: expense.category,
-      item: expense.item,
-      amount: expense.amount,
-      email: expense.email,
-      shop: expense.shop,
-      paymentMode: expense.paymentMode,
-    };
+    const response = await fetch(GOOGLE_SHEET_URL);
+    const data = await response.json();
 
-    console.log('📤 Sending to Google Sheets:', payload);
+    if (!Array.isArray(data)) {
+      console.warn("⚠️ Invalid response format from Google Sheets");
+      return [];
+    }
 
-    const response = await fetch(GOOGLE_SCRIPT_URL, {
+    const expenses: Expense[] = data.map((row: any, index: number) => ({
+      id: `sheet-${index + 1}`,
+      date: row.date || row.Date || "",
+      category: row.category || row.Category || "",
+      item: row.item || row.Item || "",
+      amount: parseFloat(row.amount || row.Amount || 0),
+      email: row.email || row["Email Address"] || "",
+      shopName: row.shop || row["Shop/Site/Person name"] || "",
+      paymentMode: row.paymentMode || row["Mode of payment"] || "",
+      labels: typeof row.labels === "string"
+        ? row.labels.split(",").map((l: string) => l.trim()).filter(Boolean)
+        : Array.isArray(row.labels)
+          ? row.labels
+          : [],
+      timestamp: row.timestamp || row.Timestamp || "",
+    }));
+
+    return expenses;
+  } catch (error) {
+    console.error("❌ Error fetching Google Sheet data:", error);
+    return [];
+  }
+}
+
+/**
+ * Add an expense to Google Sheets (via POST)
+ */
+export async function addExpenseToGoogleSheet(expense: Omit<Expense, "id" | "timestamp">): Promise<void> {
+  try {
+    const response = await fetch(GOOGLE_SHEET_URL, {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      redirect: 'follow',
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: expense.date,
+        category: expense.category,
+        item: expense.item,
+        amount: expense.amount,
+        email: expense.email,
+        shop: expense.shopName ?? "",
+        paymentMode: expense.paymentMode,
+        labels: Array.isArray(expense.labels) ? expense.labels.join(", ") : "",
+      }),
     });
 
     const result = await response.json();
-
     if (!result.success) {
-      throw new Error(result.message || "Failed to save to Google Sheet");
+      throw new Error(result.message || "Failed to add expense");
     }
-
-    console.log("✅ Expense added to Google Sheet:", result.message);
-    return true;
+    console.log("✅ Added to Google Sheets:", result.message);
   } catch (error) {
-    console.error("❌ Error adding expense to Google Sheet:", error);
-    // Don't throw - let the app continue working with local storage
-    return false;
+    console.error("❌ Error adding expense to Google Sheets:", error);
   }
-}
-
-/**
- * Import data from a published Google Sheet (as CSV)
- */
-export async function importFromPublishedSheet(
-  csvUrl: string
-): Promise<string> {
-  try {
-    const res = await fetch(csvUrl);
-    if (!res.ok) throw new Error(`Failed to fetch CSV: ${res.status}`);
-    const csv = await res.text();
-    return csv;
-  } catch (error) {
-    console.error("Error importing from published sheet:", error);
-    throw error;
-  }
-}
-
-/**
- * Import data from an Apps Script Web App that returns JSON.
- */
-export async function importFromAppsScript(jsonUrl: string): Promise<any[]> {
-  try {
-    const res = await fetch(jsonUrl);
-    if (!res.ok) throw new Error(`Failed to fetch JSON: ${res.status}`);
-    const data = await res.json();
-    if (!Array.isArray(data)) throw new Error("Expected JSON array");
-    return data;
-  } catch (error) {
-    console.error("Error importing from Apps Script:", error);
-    throw error;
-  }
-}
-
-/**
- * Export all expenses (CSV string) and share/download it.
- */
-export async function exportCSV(csv: string): Promise<void> {
-  try {
-    if (Platform.OS === "web") {
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `expenses_${new Date().toISOString().split("T")[0]}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } else {
-      await Share.share({
-        message: csv,
-        title: "Expense Report CSV",
-      });
-    }
-  } catch (error) {
-    console.error("Error exporting to CSV:", error);
-    throw error;
-  }
-}
-
-/**
- * Instruction text for users
- */
-export function getInstructions(): string {
-  return `To import this data into Google Sheets:
-
-1. Export the CSV file using the Export button in the Dashboard
-2. Open Google Sheets (sheets.google.com)
-3. Create a new spreadsheet or open an existing one
-4. Go to File > Import
-5. Choose the CSV file you exported
-6. Select "Insert new sheet(s)" or "Replace spreadsheet"
-7. Click "Import data"
-
-The CSV format matches the structure of your expense tracking form.`;
 }
