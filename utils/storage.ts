@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   EXPENSES: "expenses",
   USER: "user",
   SETTINGS: "settings",
+  LABELS: "labels", // ✅ new key
 };
 
 async function saveData<T>(key: string, data: T): Promise<void> {
@@ -102,4 +103,31 @@ export const storageService = {
       return null;
     }
   },
+    async saveLabel(label: string) {
+    try {
+      let labels = await loadData<string[]>(STORAGE_KEYS.LABELS);
+      if (!Array.isArray(labels)) labels = [];
+
+      // add new label (keep unique)
+      if (!labels.includes(label)) {
+        labels.unshift(label); // newest first
+        labels = labels.slice(0, 20); // limit to last 20
+      }
+
+      await saveData(STORAGE_KEYS.LABELS, labels);
+    } catch (error) {
+      console.error("❌ Error saving label:", error);
+    }
+  },
+
+  async getRecentLabels(): Promise<string[]> {
+    try {
+      const labels = await loadData<string[]>(STORAGE_KEYS.LABELS);
+      return Array.isArray(labels) ? labels : [];
+    } catch (error) {
+      console.error("❌ Error loading labels:", error);
+      return [];
+    }
+  },
 };
+

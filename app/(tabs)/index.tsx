@@ -13,7 +13,7 @@ import { PAYMENT_MODES, Expense } from '@/types/expense';
 import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
 import DatePicker from '@/components/DatePicker';
 import Dropdown from '@/components/Dropdown';
-import TagInput from '@/components/TagInput';
+import LabelSelector from '@/components/LabelSelector';
 
 export default function AddExpense() {
   const [email, setEmail] = useState('');
@@ -198,7 +198,7 @@ export default function AddExpense() {
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>Labels</Text>
-        <TagInput value={labels} onChange={setLabels} />
+        <LabelSelector value={labels} onChange={setLabels} />
       </View>
 
       <TouchableOpacity
