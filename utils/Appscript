@@ -1,0 +1,42 @@
+function doPost(e) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
+    const data = JSON.parse(e.postData.contents);
+
+    // Append new expense row
+    sheet.appendRow([
+      new Date(),        // Timestamp
+      data.date,         // Date
+      data.category,     // Category
+      data.item,         // Item
+      data.amount,       // Amount
+      data.email,        // Email
+      data.shop,         // Shop/Site/Person name
+      data.paymentMode   // Mode of payment
+    ]);
+
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        success: true,
+        message: "Expense added successfully"
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        success: false,
+        message: error.toString()
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      status: "API is running",
+      timestamp: new Date().toISOString()
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
