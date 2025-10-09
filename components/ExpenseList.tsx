@@ -28,11 +28,14 @@ export default function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
       {expenses.map((expense) => (
         <View key={expense.id} style={styles.expenseItem}>
           <View style={styles.expenseMain}>
-            <View style={styles.expenseLeft}>
-              <Text style={styles.expenseItem_name}>{expense.item}</Text>
-              <Text style={styles.expenseCategory}>{expense.category}</Text>
-              <Text style={styles.expenseDate}>{formatDate(expense.date)}</Text>
-            </View>
+              <View style={styles.expenseLeft}>
+                <Text style={styles.expenseItem_name}>{expense.item}</Text>
+                <Text style={styles.expenseCategory}>
+                  {expense.category}
+                  {expense.subCategory ? ` • ${expense.subCategory}` : ''}
+                </Text>
+                <Text style={styles.expenseDate}>{formatDate(expense.date)}</Text>
+              </View>
             <View style={styles.expenseRight}>
               <Text style={styles.expenseAmount}>₹{expense.amount.toFixed(2)}</Text>
               <Text style={styles.expensePayment}>{expense.paymentMode}</Text>

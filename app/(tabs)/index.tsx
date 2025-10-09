@@ -7,10 +7,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  Platform,
 } from 'react-native';
 import { storageService } from '@/utils/storage';
-import { CATEGORIES, PAYMENT_MODES, Expense } from '@/types/expense';
+import { PAYMENT_MODES, Expense } from '@/types/expense';
+import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
 import DatePicker from '@/components/DatePicker';
 import Dropdown from '@/components/Dropdown';
 import TagInput from '@/components/TagInput';
@@ -19,12 +19,15 @@ export default function AddExpense() {
   const [email, setEmail] = useState('');
   const [date, setDate] = useState(new Date());
   const [category, setCategory] = useState('');
+  const [subCategory, setSubCategory] = useState('');
   const [item, setItem] = useState('');
   const [shopName, setShopName] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMode, setPaymentMode] = useState('');
   const [labels, setLabels] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
 
   useEffect(() => {
     loadUserEmail();
@@ -45,6 +48,11 @@ export default function AddExpense() {
 
     if (!category) {
       Alert.alert('Error', 'Please select a category');
+      return;
+    }
+
+    if (!subCategory) {
+      Alert.alert('Error', 'Please select a sub-category');
       return;
     }
 
@@ -73,12 +81,13 @@ export default function AddExpense() {
         email: email.trim(),
         date: date.toISOString().split('T')[0],
         category,
+        subCategory, // ✅ new
         item: item.trim(),
         shopName: shopName.trim(),
         amount: Number(amount),
         paymentMode,
         labels,
-        createdAt: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
       };
 
       await storageService.saveExpense(expense);
@@ -86,6 +95,7 @@ export default function AddExpense() {
       Alert.alert('Success', 'Expense added successfully!');
 
       setCategory('');
+      setSubCategory('');
       setItem('');
       setShopName('');
       setAmount('');
@@ -124,11 +134,26 @@ export default function AddExpense() {
         <Text style={styles.label}>Category *</Text>
         <Dropdown
           value={category}
-          onChange={setCategory}
+          onChange={(value) => {
+            setCategory(value);
+            setSubCategory('');
+          }}
           options={CATEGORIES}
           placeholder="Select a category"
         />
       </View>
+
+      {subCategoryOptions.length > 0 && (
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Sub-Category *</Text>
+          <Dropdown
+            value={subCategory}
+            onChange={setSubCategory}
+            options={subCategoryOptions}
+            placeholder="Select a sub-category"
+          />
+        </View>
+      )}
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>Item *</Text>

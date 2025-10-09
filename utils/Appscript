@@ -3,16 +3,18 @@ function doPost(e) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
     const data = JSON.parse(e.postData.contents);
 
-    // Append new expense row
+    // Append new row to Google Sheet
     sheet.appendRow([
-      new Date(),        // Timestamp
-      data.date,         // Date
-      data.category,     // Category
-      data.item,         // Item
-      data.amount,       // Amount
-      data.email,        // Email
-      data.shop,         // Shop/Site/Person name
-      data.paymentMode   // Mode of payment
+      new Date(), // Timestamp
+      data.date, // Date
+      data.category, // Category
+      data.subCategory || "", // ✅ Sub Category
+      data.item, // Item
+      data.amount, // Amount
+      data.email, // Email Address
+      data.shop, // Shop/Site/Person name
+      data.paymentMode, // Mode of payment
+      Array.isArray(data.labels) ? data.labels.join(", ") : data.labels || "" // ✅ Labels
     ]);
 
     return ContentService
@@ -32,11 +34,36 @@ function doPost(e) {
   }
 }
 
+// ✅ Fetch all data (including Labels)
 function doGet(e) {
-  return ContentService
-    .createTextOutput(JSON.stringify({
-      status: "API is running",
-      timestamp: new Date().toISOString()
-    }))
-    .setMimeType(ContentService.MimeType.JSON);
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
+    const data = sheet.getDataRange().getValues(); // all rows
+
+    // Assume first row is header
+    const headers = data[0];
+    const rows = data.slice(1);
+
+    const expenses = rows.map(r => ({
+      timestamp: r[0],
+      date: r[1],
+      category: r[2],
+      subCategory: r[3], // ✅ Added
+     item: r[4],
+      amount: r[5],
+      email: r[6],
+      shop: r[7],
+      paymentMode: r[8],
+      labels: r[9] ? r[9].split(",").map(s => s.trim()).filter(Boolean) : []
+    }));
+
+    return ContentService
+      .createTextOutput(JSON.stringify(expenses))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: error.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }

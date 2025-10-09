@@ -36,7 +36,7 @@ export const storageService = {
     await saveData(STORAGE_KEYS.USER, { email });
   },
 
-  // ✅ Save expense locally + send to Google Sheets
+  // ✅ Save expense locally + sync to Google Sheets
   async saveExpense(expense: Expense): Promise<void> {
     try {
       let expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES);
@@ -47,7 +47,19 @@ export const storageService = {
       expenses.push(expense);
       await saveData(STORAGE_KEYS.EXPENSES, expenses);
 
-      await addExpenseToGoogleSheet(expense);
+      // ✅ Send to Google Sheet (including subCategory)
+      await addExpenseToGoogleSheet({
+        date: expense.date,
+        category: expense.category,
+        subCategory: expense.subCategory ?? "", // ✅ added
+        item: expense.item,
+        amount: expense.amount,
+        email: expense.email,
+        shopName: expense.shopName ?? "",
+        paymentMode: expense.paymentMode,
+        labels: expense.labels ?? [],
+      });
+
       console.log("✅ Expense saved locally & to Google Sheets");
     } catch (error) {
       console.error("❌ Error saving expense:", error);
@@ -80,9 +92,9 @@ export const storageService = {
       const expenses = await this.getExpenses();
       if (expenses.length === 0) return null;
 
-      const header = "Date,Category,Item,Amount,Email,Shop,Payment Mode,Labels\n";
+      const header = "Date,Category,Subcategory,Item,Amount,Email,Shop,Payment Mode,Labels\n";
       const rows = expenses.map(e =>
-        `${e.date},${e.category},${e.item},${e.amount},${e.email},${e.shopName},${e.paymentMode},"${e.labels.join(", ")}"`
+        `${e.date},${e.category},${e.subCategory ?? ""},${e.item},${e.amount},${e.email},${e.shopName},${e.paymentMode},"${e.labels.join(", ")}"`
       );
       return header + rows.join("\n");
     } catch (error) {
