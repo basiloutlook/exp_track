@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -118,21 +118,6 @@ export default function AddExpense() {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleCancel = () => {
-    Alert.alert(
-      'Discard Changes?',
-      'Are you sure you want to discard your changes? This action cannot be undone.',
-      [
-        { text: 'Keep Editing', style: 'cancel' },
-        {
-          text: 'Discard',
-          style: 'destructive',
-          onPress: () => router.push('/dashboard'),
-        },
-      ]
-    );
   };
 
   const isEditMode = !!expenseId;
