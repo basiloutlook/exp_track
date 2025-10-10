@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Expense } from "@/types/expense";
-import { addExpenseToGoogleSheet } from "./googleSheets";
+import { addExpenseToGoogleSheet, updateExpenseInGoogleSheet } from "./googleSheets";
 
 const STORAGE_KEYS = {
   EXPENSES: "expenses",
@@ -98,6 +98,10 @@ export const storageService = {
         expenses[idx] = updated;
       }
       await saveData(STORAGE_KEYS.EXPENSES, expenses);
+
+      // Also update in Google Sheets
+      await updateExpenseInGoogleSheet(updated);
+
     } catch (error) {
       console.error('❌ Error updating expense:', error);
     }

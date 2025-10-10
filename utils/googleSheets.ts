@@ -76,3 +76,38 @@ export async function addExpenseToGoogleSheet(
     console.error('❌ Error adding expense to Google Sheets:', error);
   }
 }
+
+/**
+ * Update an expense in Google Sheets (via POST with an 'update' action)
+ */
+export async function updateExpenseInGoogleSheet(expense: Expense): Promise<void> {
+  try {
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update', // Specify the action
+        id: expense.id,     // Include the ID to find the row
+        date: expense.date,
+        category: expense.category,
+        subCategory: expense.subCategory ?? '',
+        item: expense.item,
+        amount: expense.amount,
+        email: expense.email,
+        shop: expense.shopName ?? '',
+        paymentMode: expense.paymentMode,
+        labels: Array.isArray(expense.labels)
+          ? expense.labels.join(', ')
+          : expense.labels || '',
+      }),
+    });
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to update expense in Google Sheet');
+    }
+    console.log('✅ Updated in Google Sheets:', result.message);
+  } catch (error) {
+    console.error('❌ Error updating expense in Google Sheets:', error);
+  }
+}

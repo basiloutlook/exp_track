@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  BackHandler,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
@@ -135,6 +136,38 @@ export default function AddExpense() {
   };
 
   const isEditMode = !!expenseId;
+
+  const handleCancel = useCallback(() => {
+    Alert.alert(
+      'Discard Changes?',
+      'Are you sure you want to discard your changes? This action cannot be undone.',
+      [
+        { text: 'Keep Editing', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => router.push('/dashboard'),
+        },
+      ]
+    );
+  }, [router]);
+
+  useEffect(() => {
+    const backAction = () => {
+      if (isEditMode) {
+        handleCancel();
+        return true; // Prevents default back button behavior
+      }
+      return false; // Allows default behavior (exit app)
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, [isEditMode, handleCancel]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
