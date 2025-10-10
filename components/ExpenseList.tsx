@@ -5,9 +5,10 @@ import { Trash2 } from 'lucide-react-native';
 interface ExpenseListProps {
   expenses: Expense[];
   onDelete: (id: string) => void;
+  onEdit?: (expense: Expense) => void;
 }
 
-export default function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
+export default function ExpenseList({ expenses, onDelete, onEdit }: ExpenseListProps) {
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -54,11 +55,20 @@ export default function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
             </View>
           )}
 
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => onDelete(expense.id)}>
-            <Trash2 size={16} color="#ef4444" />
-          </TouchableOpacity>
+          <View style={styles.actionButtons}>
+            {onEdit && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => onEdit && onEdit(expense)}>
+                <Text style={styles.editText}>Edit</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => onDelete(expense.id)}>
+              <Trash2 size={16} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
         </View>
       ))}
     </View>
@@ -133,10 +143,26 @@ const styles = StyleSheet.create({
     color: '#3730a3',
   },
   deleteButton: {
+    padding: 4,
+  },
+  actionButtons: {
     position: 'absolute',
     top: 8,
     right: 8,
-    padding: 4,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  actionButton: {
+    backgroundColor: '#eef2ff',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  editText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '600',
   },
   emptyText: {
     fontSize: 14,

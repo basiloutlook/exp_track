@@ -77,6 +77,32 @@ export const storageService = {
     }
   },
 
+  // Replace the entire expenses array (used by import or updates)
+  async setExpenses(expenses: Expense[]): Promise<void> {
+    try {
+      await saveData(STORAGE_KEYS.EXPENSES, expenses);
+    } catch (error) {
+      console.error('❌ Error setting expenses:', error);
+    }
+  },
+
+  // Update a single expense by id
+  async updateExpense(updated: Expense): Promise<void> {
+    try {
+      const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES) || [];
+      const idx = expenses.findIndex(e => e.id === updated.id);
+      if (idx === -1) {
+        // if not found, append
+        expenses.push(updated);
+      } else {
+        expenses[idx] = updated;
+      }
+      await saveData(STORAGE_KEYS.EXPENSES, expenses);
+    } catch (error) {
+      console.error('❌ Error updating expense:', error);
+    }
+  },
+
   async deleteExpense(id: string): Promise<void> {
     try {
       const expenses = await this.getExpenses();
