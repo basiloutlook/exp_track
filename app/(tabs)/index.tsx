@@ -208,7 +208,7 @@ export default function AddExpense() {
         />
       </View>
 
-      <View style={styles.formG}>
+      <View style={styles.formGroup}>
         <Text style={styles.label}>Labels</Text>
         <LabelSelector value={labels} onChange={setLabels} />
       </View>
