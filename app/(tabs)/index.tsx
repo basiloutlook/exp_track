@@ -115,30 +115,28 @@ export default function AddExpense() {
       }
 
       const backAction = () => {
-        if (isEditMode) {
+        if (expenseId) {
           handleCancel();
           return true;
-        } else {
-          BackHandler.exitApp();
-          return true;
         }
+        return false;
       };
 
       const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
       return () => backHandler.remove();
-    }, [params.expense])
+    }, [params.expense, expenseId])
   );
 
   // ✅ Cancel edit confirmation
   const handleCancel = useCallback(() => {
-    Alert.alert('Discard Changes?', 'Are you sure you want to discard your changes?', [
+    Alert.alert('', 'Do you want to keep editing or discard changes?', [
       { text: 'Keep Editing', style: 'cancel' },
       {
         text: 'Discard',
         style: 'destructive',
         onPress: () => {
           resetForm();
-          router.push('/dashboard');
+          router.replace('/dashboard');
         },
       },
     ]);
@@ -169,7 +167,7 @@ export default function AddExpense() {
             text: 'OK',
             onPress: () => {
               resetForm();
-              router.push('/dashboard');
+              router.replace('/dashboard');
             },
           },
         ]

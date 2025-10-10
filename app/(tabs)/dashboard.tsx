@@ -478,9 +478,9 @@ export default function Dashboard() {
 };
 
 const handleEditExpense = (expense: Expense) => {
-  // Use push instead of replace to ensure params are passed
+  // Navigate to Add Expense page with expense data
   router.push({
-    pathname: '/',
+    pathname: '/(tabs)/',
     params: { expense: JSON.stringify(expense) },
   });
 };
