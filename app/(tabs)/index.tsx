@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
+import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { storageService } from '@/utils/storage';
 import { PAYMENT_MODES, Expense } from '@/types/expense';
 import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
@@ -16,6 +17,10 @@ import Dropdown from '@/components/Dropdown';
 import LabelSelector from '@/components/LabelSelector';
 
 export default function AddExpense() {
+  const { expense: expenseString } = useLocalSearchParams<{ expense?: string }>();
+  const navigation = useNavigation();
+
+  const [expenseId, setExpenseId] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [date, setDate] = useState(new Date());
   const [category, setCategory] = useState('');
@@ -30,8 +35,22 @@ export default function AddExpense() {
   const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
 
   useEffect(() => {
-    loadUserEmail();
-  }, []);
+    if (expenseString) {
+      const expenseToEdit = JSON.parse(expenseString);
+      setExpenseId(expenseToEdit.id);
+      setEmail(expenseToEdit.email);
+      setDate(new Date(expenseToEdit.date));
+      setCategory(expenseToEdit.category);
+      setSubCategory(expenseToEdit.subCategory);
+      setItem(expenseToEdit.item);
+      setShopName(expenseToEdit.shopName || '');
+      setAmount(String(expenseToEdit.amount));
+      setPaymentMode(expenseToEdit.paymentMode);
+      setLabels(expenseToEdit.labels || []);
+    } else {
+      loadUserEmail();
+    }
+  }, [expenseString]);
 
   const loadUserEmail = async () => {
     const savedEmail = await storageService.getUserEmail();
@@ -40,34 +59,22 @@ export default function AddExpense() {
     }
   };
 
+  const resetForm = () => {
+    setExpenseId(null);
+    setCategory('');
+    setSubCategory('');
+    setItem('');
+    setShopName('');
+    setAmount('');
+    setPaymentMode('');
+    setLabels([]);
+    setDate(new Date());
+    // Do not reset email
+  };
+
   const handleSubmit = async () => {
-    if (!email.trim()) {
-      Alert.alert('Error', 'Please enter your email');
-      return;
-    }
-
-    if (!category) {
-      Alert.alert('Error', 'Please select a category');
-      return;
-    }
-
-    if (!subCategory) {
-      Alert.alert('Error', 'Please select a sub-category');
-      return;
-    }
-
-    if (!item.trim()) {
-      Alert.alert('Error', 'Please enter an item');
-      return;
-    }
-
-    if (!amount.trim() || isNaN(Number(amount))) {
-      Alert.alert('Error', 'Please enter a valid amount');
-      return;
-    }
-
-    if (!paymentMode) {
-      Alert.alert('Error', 'Please select a payment mode');
+    if (!email.trim() || !category || !subCategory || !item.trim() || !amount.trim() || isNaN(Number(amount)) || !paymentMode) {
+      Alert.alert('Error', 'Please fill all required fields');
       return;
     }
 
@@ -76,42 +83,47 @@ export default function AddExpense() {
     try {
       await storageService.saveUserEmail(email);
 
-      const expense: Expense = {
-        id: Date.now().toString(),
+      const expenseData: Omit<Expense, 'id' | 'timestamp'> = {
         email: email.trim(),
         date: date.toISOString().split('T')[0],
         category,
-        subCategory, // ✅ new
+        subCategory,
         item: item.trim(),
         shopName: shopName.trim(),
         amount: Number(amount),
         paymentMode,
         labels,
-        timestamp: new Date().toISOString(),
       };
 
-      await storageService.saveExpense(expense);
-
-      Alert.alert('Success', 'Expense added successfully!');
-
-      setCategory('');
-      setSubCategory('');
-      setItem('');
-      setShopName('');
-      setAmount('');
-      setPaymentMode('');
-      setLabels([]);
-      setDate(new Date());
+      if (expenseId) {
+        // Update existing expense
+        const updatedExpense: Expense = { ...expenseData, id: expenseId, timestamp: new Date().toISOString() };
+        await storageService.updateExpense(updatedExpense);
+        Alert.alert('Success', 'Expense updated successfully!');
+        navigation.goBack();
+      } else {
+        // Add new expense
+        const newExpense: Expense = {
+          ...expenseData,
+          id: Date.now().toString(),
+          timestamp: new Date().toISOString(),
+        };
+        await storageService.saveExpense(newExpense);
+        Alert.alert('Success', 'Expense added successfully!');
+        resetForm();
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to save expense. Please try again.');
+      Alert.alert('Error', `Failed to ${expenseId ? 'update' : 'save'} expense. Please try again.`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const isEditMode = !!expenseId;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.title}>Add Expense</Text>
+      <Text style={styles.title}>{isEditMode ? 'Edit Expense' : 'Add Expense'}</Text>
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>Email *</Text>
@@ -196,7 +208,7 @@ export default function AddExpense() {
         />
       </View>
 
-      <View style={styles.formGroup}>
+      <View style={styles.formG}>
         <Text style={styles.label}>Labels</Text>
         <LabelSelector value={labels} onChange={setLabels} />
       </View>
@@ -206,7 +218,7 @@ export default function AddExpense() {
         onPress={handleSubmit}
         disabled={isSubmitting}>
         <Text style={styles.submitButtonText}>
-          {isSubmitting ? 'Saving...' : 'Add Expense'}
+          {isSubmitting ? 'Saving...' : (isEditMode ? 'Update Expense' : 'Add Expense')}
         </Text>
       </TouchableOpacity>
     </ScrollView>

@@ -464,8 +464,9 @@ export default function Dashboard() {
   // --- END MODIFICATION 3 ---
   
   const handleEditExpense = (expense: Expense) => {
-      Alert.alert('Edit', `Navigating to edit screen for: ${expense.item}`);
-      // In a real app, this would navigate to an Edit screen
+    // Navigate to the 'Add Expense' screen (route name 'index') and pass the expense data
+    // The `as never` is used to bypass TypeScript errors since the navigator is not strongly typed here
+    navigation.navigate('index' as never, { expense: JSON.stringify(expense) } as never);
   };
 
   const handleApplyFilters = (newFilters: any) => {
