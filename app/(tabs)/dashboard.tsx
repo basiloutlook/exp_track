@@ -410,6 +410,7 @@ export default function Dashboard() {
   const [selectedCategoryForDrill, setSelectedCategoryForDrill] = useState<string | null>(null);
   // NEW STATE: For managing how many categories are visible
   const [categoryShowCount, setCategoryShowCount] = useState(ITEMS_PER_LOAD);
+  const [transactionShowCount, setTransactionShowCount] = useState(ITEMS_PER_LOAD);
 
   // This drill-down state is set by clicking a BarChart item
   const [drillDownDateFilter, setDrillDownDateFilter] = useState<{ startDate: Date, endDate: Date } | null>(null);
@@ -506,6 +507,14 @@ export default function Dashboard() {
 
   const handleCollapseCategories = useCallback(() => {
       setCategoryShowCount(prev => Math.max(ITEMS_PER_LOAD, prev - ITEMS_PER_LOAD));
+  }, []);
+
+  const handleShowMoreTransactions = useCallback(() => {
+    setTransactionShowCount(prev => prev + ITEMS_PER_LOAD);
+  }, []);
+
+  const handleCollapseTransactions = useCallback(() => {
+    setTransactionShowCount(prev => Math.max(ITEMS_PER_LOAD, prev - ITEMS_PER_LOAD));
   }, []);
 
 
@@ -866,10 +875,28 @@ export default function Dashboard() {
                     <Text style={styles.sectionTitle}>Recent Transactions</Text>
                     {/* Expense List: Uses filteredExpenses */}
                     <ExpenseList
-                        expenses={filteredExpenses.slice(0, 5)}
+                        expenses={filteredExpenses.slice(0, transactionShowCount)}
                         onDelete={handleDeleteExpense}
                         onEdit={handleEditExpense}
                     />
+
+                    {filteredExpenses.length > ITEMS_PER_LOAD && (
+                      <View style={styles.paginationControls}>
+                        {transactionShowCount > ITEMS_PER_LOAD && (
+                          <TouchableOpacity style={styles.collapseButton} onPress={handleCollapseTransactions}>
+                            <Text style={styles.paginationText}>Collapse</Text>
+                            <ChevronUp size={16} color="#2563eb" />
+                          </TouchableOpacity>
+                        )}
+                        {filteredExpenses.length > transactionShowCount && (
+                           <TouchableOpacity style={styles.moreButton} onPress={handleShowMoreTransactions}>
+                            <Text style={styles.paginationText}>More ({filteredExpenses.length - transactionShowCount} left)</Text>
+                            <ChevronDown size={16} color="#2563eb" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+
                     <View style={[styles.detailContainer, styles.detailLeft, { marginTop: 12, borderTopWidth: 0, paddingBottom: 0, paddingTop: 0 }]}>
                         <Text style={styles.detailText}>Filtered by: {getMainFilterDetail()}</Text>
                     </View>

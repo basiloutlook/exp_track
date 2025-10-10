@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -35,23 +36,27 @@ export default function AddExpense() {
 
   const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
 
-  useEffect(() => {
-    if (expenseString) {
-      const expenseToEdit = JSON.parse(expenseString);
-      setExpenseId(expenseToEdit.id);
-      setEmail(expenseToEdit.email);
-      setDate(new Date(expenseToEdit.date));
-      setCategory(expenseToEdit.category);
-      setSubCategory(expenseToEdit.subCategory);
-      setItem(expenseToEdit.item);
-      setShopName(expenseToEdit.shopName || '');
-      setAmount(String(expenseToEdit.amount));
-      setPaymentMode(expenseToEdit.paymentMode);
-      setLabels(expenseToEdit.labels || []);
-    } else {
-      loadUserEmail();
-    }
-  }, [expenseString]);
+  useFocusEffect(
+    useCallback(() => {
+      if (expenseString) {
+        const expenseToEdit = JSON.parse(expenseString);
+        setExpenseId(expenseToEdit.id);
+        setEmail(expenseToEdit.email);
+        setDate(new Date(expenseToEdit.date));
+        setCategory(expenseToEdit.category);
+        setSubCategory(expenseToEdit.subCategory);
+        setItem(expenseToEdit.item);
+        setShopName(expenseToEdit.shopName || '');
+        setAmount(String(expenseToEdit.amount));
+        setPaymentMode(expenseToEdit.paymentMode);
+        setLabels(expenseToEdit.labels || []);
+      } else {
+        // When the screen is focused and we are not editing, reset the form.
+        resetForm();
+        loadUserEmail();
+      }
+    }, [expenseString])
+  );
 
   const loadUserEmail = async () => {
     const savedEmail = await storageService.getUserEmail();
@@ -158,12 +163,6 @@ export default function AddExpense() {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <Text style={styles.title}>{isEditMode ? 'Edit Expense' : 'Add Expense'}</Text>
 
-      {isEditMode && (
-        <TouchableOpacity onPress={handleCancel} style={styles.cancelButton}>
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-      )}
-
       <View style={styles.formGroup}>
         <Text style={styles.label}>Email *</Text>
         <TextInput
@@ -265,18 +264,6 @@ export default function AddExpense() {
 }
 
 const styles = StyleSheet.create({
-  cancelButton: {
-    position: 'absolute',
-    top: 28,
-    right: 20,
-    padding: 8,
-    backgroundColor: '#fee2e2',
-    borderRadius: 8,
-  },
-  cancelButtonText: {
-    color: '#ef4444',
-    fontWeight: '600',
-  },
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',
