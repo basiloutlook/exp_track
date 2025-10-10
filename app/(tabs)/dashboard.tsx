@@ -9,6 +9,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
+import { deleteExpenseFromGoogleSheet } from '@/utils/googleSheets';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
@@ -438,39 +439,51 @@ export default function Dashboard() {
     }, [loadExpenses])
   );
 
-  // --- MODIFICATION 3: Add Cancel button to Delete Alert ---
   const handleDeleteExpense = async (id: string) => {
-      Alert.alert(
-          'Delete Expense', 
-          `Are you sure you want to delete expense ID: ${id}? This action cannot be undone.`,
-          [
-              {
-                  text: "Cancel",
-                  onPress: () => console.log("Delete cancelled"),
-                  style: "cancel" // Use "cancel" style for the cancel button
-              },
-              { 
-                  text: "Delete", 
-                  onPress: () => {
-                      // In a real app, this would perform deletion and update state/storage
-                      console.log(`Confirm deletion of expense ID: ${id}`);
-                      // For a full implementation:
-                      // await storageService.deleteExpense(id);
-                      // loadExpenses(); 
-                  },
-                  style: "destructive" // Use "destructive" style for the delete button
-              }
-          ]
-      );
-  };
-  // --- END MODIFICATION 3 ---
-  
-  const handleEditExpense = (expense: Expense) => {
-    router.push({
-      pathname: '/',
-      params: { expense: JSON.stringify(expense) },
-    });
-  };
+  Alert.alert(
+    'Delete Expense',
+    'Are you sure you want to delete this expense? This action cannot be undone.',
+    [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            console.log(`🗑️ Starting delete for ID: ${id}`);
+            
+            // 1. Delete from Google Sheet first
+            await deleteExpenseFromGoogleSheet(id);
+            console.log(`✅ Deleted from Google Sheet: ${id}`);
+            
+            // 2. Delete locally
+            await storageService.deleteExpense(id);
+            console.log(`✅ Deleted locally: ${id}`);
+            
+            // 3. Refresh the list from Google Sheet
+            await loadExpenses();
+            
+            Alert.alert('Success', 'Expense deleted successfully!');
+          } catch (error) {
+            console.error('❌ Error deleting expense:', error);
+            Alert.alert('Error', 'Failed to delete expense. Please try again.');
+          }
+        },
+      },
+    ]
+  );
+};
+
+const handleEditExpense = (expense: Expense) => {
+  // Use push instead of replace to ensure params are passed
+  router.push({
+    pathname: '/',
+    params: { expense: JSON.stringify(expense) },
+  });
+};
 
   const handleApplyFilters = (newFilters: any) => {
     // Reset drill-down when main filters are applied

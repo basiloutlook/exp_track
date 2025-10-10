@@ -20,6 +20,7 @@ export const CATEGORY_MAP: Record<string, string[]> = {
     "Public Transport",
     "Taxi",
     "Parking",
+    "Vehicle",
   ],
   "Health & Wellness": [
     "Doctor & Consultations",

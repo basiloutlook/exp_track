@@ -1,12 +1,16 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Expense } from "@/types/expense";
-import { addExpenseToGoogleSheet, updateExpenseInGoogleSheet } from "./googleSheets";
+import {
+  addExpenseToGoogleSheet,
+  updateExpenseInGoogleSheet,
+  deleteExpenseFromGoogleSheet,
+} from "./googleSheets";
 
 const STORAGE_KEYS = {
   EXPENSES: "expenses",
   USER: "user",
   SETTINGS: "settings",
-  LABELS: "labels", // ✅ new key
+  LABELS: "labels",
 };
 
 async function saveData<T>(key: string, data: T): Promise<void> {
@@ -37,36 +41,6 @@ export const storageService = {
     await saveData(STORAGE_KEYS.USER, { email });
   },
 
-  // ✅ Save expense locally + sync to Google Sheets
-  async saveExpense(expense: Expense): Promise<void> {
-    try {
-      let expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES);
-      if (!Array.isArray(expenses)) expenses = [];
-
-      if (!expense.id) expense.id = Date.now().toString();
-
-      expenses.push(expense);
-      await saveData(STORAGE_KEYS.EXPENSES, expenses);
-
-      // ✅ Send to Google Sheet (including subCategory)
-      await addExpenseToGoogleSheet({
-        date: expense.date,
-        category: expense.category,
-        subCategory: expense.subCategory ?? "", // ✅ added
-        item: expense.item,
-        amount: expense.amount,
-        email: expense.email,
-        shopName: expense.shopName ?? "",
-        paymentMode: expense.paymentMode,
-        labels: expense.labels ?? [],
-      });
-
-      console.log("✅ Expense saved locally & to Google Sheets");
-    } catch (error) {
-      console.error("❌ Error saving expense:", error);
-    }
-  },
-
   async getExpenses(): Promise<Expense[]> {
     try {
       const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES);
@@ -77,44 +51,90 @@ export const storageService = {
     }
   },
 
-  // Replace the entire expenses array (used by import or updates)
   async setExpenses(expenses: Expense[]): Promise<void> {
+    await saveData(STORAGE_KEYS.EXPENSES, expenses);
+  },
+
+  // NEW: Add expense locally only (no Google Sheet sync)
+  async addExpenseOnly(expense: Expense): Promise<void> {
     try {
+      const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
+      expenses.push(expense);
       await saveData(STORAGE_KEYS.EXPENSES, expenses);
+      console.log("✅ Expense added locally");
     } catch (error) {
-      console.error('❌ Error setting expenses:', error);
+      console.error("❌ Error adding expense locally:", error);
     }
   },
 
-  // Update a single expense by id
-  async updateExpense(updated: Expense): Promise<void> {
+  // NEW: Update expense locally only (no Google Sheet sync)
+  async updateExpenseOnly(updated: Expense): Promise<void> {
     try {
-      const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES) || [];
-      const idx = expenses.findIndex(e => e.id === updated.id);
-      if (idx === -1) {
-        // if not found, append
-        expenses.push(updated);
-      } else {
+      const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
+      const idx = expenses.findIndex((e) => e.id === updated.id);
+      if (idx >= 0) {
         expenses[idx] = updated;
+      } else {
+        expenses.push(updated);
       }
       await saveData(STORAGE_KEYS.EXPENSES, expenses);
-
-      // Also update in Google Sheets
-      await updateExpenseInGoogleSheet(updated);
-
+      console.log("✅ Updated expense locally");
     } catch (error) {
-      console.error('❌ Error updating expense:', error);
+      console.error("❌ Error updating expense locally:", error);
+    }
+  },
+
+  // DEPRECATED: This was causing duplicates. Use addExpenseOnly or updateExpenseOnly instead
+  async saveExpense(expense: Expense): Promise<void> {
+    try {
+      let expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
+
+      // Ensure ID exists
+      if (!expense.id) {
+        expense.id = Date.now().toString();
+      }
+
+      const idx = expenses.findIndex((e) => e.id === expense.id);
+      if (idx >= 0) {
+        expenses[idx] = expense;
+        await updateExpenseInGoogleSheet(expense);
+      } else {
+        expenses.push(expense);
+        await addExpenseToGoogleSheet(expense);
+      }
+
+      await saveData(STORAGE_KEYS.EXPENSES, expenses);
+      console.log("✅ Expense saved locally and synced to sheet");
+    } catch (error) {
+      console.error("❌ Error saving expense:", error);
+    }
+  },
+
+  // Keep for backward compatibility but update locally only
+  async updateExpense(updated: Expense): Promise<void> {
+    try {
+      const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
+      const idx = expenses.findIndex((e) => e.id === updated.id);
+      if (idx >= 0) {
+        expenses[idx] = updated;
+      } else {
+        expenses.push(updated);
+      }
+      await saveData(STORAGE_KEYS.EXPENSES, expenses);
+      console.log("✅ Updated expense locally");
+    } catch (error) {
+      console.error("❌ Error updating expense:", error);
     }
   },
 
   async deleteExpense(id: string): Promise<void> {
     try {
-      const expenses = await this.getExpenses();
-      const filtered = expenses.filter(e => e.id !== id);
+      const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
+      const filtered = expenses.filter((e) => e.id !== id);
       await saveData(STORAGE_KEYS.EXPENSES, filtered);
       console.log("🗑️ Expense deleted locally:", id);
     } catch (error) {
-      console.error("❌ Error deleting expense:", error);
+      console.error("❌ Error deleting expense locally:", error);
     }
   },
 
@@ -124,8 +144,11 @@ export const storageService = {
       if (expenses.length === 0) return null;
 
       const header = "Date,Category,Subcategory,Item,Amount,Email,Shop,Payment Mode,Labels\n";
-      const rows = expenses.map(e =>
-        `${e.date},${e.category},${e.subCategory ?? ""},${e.item},${e.amount},${e.email},${e.shopName},${e.paymentMode},"${e.labels.join(", ")}"`
+      const rows = expenses.map(
+        (e) =>
+          `${e.date},${e.category},${e.subCategory ?? ""},${e.item},${e.amount},${e.email},${e.shopName},${e.paymentMode},"${(e.labels || []).join(
+            ", "
+          )}"`
       );
       return header + rows.join("\n");
     } catch (error) {
@@ -133,17 +156,14 @@ export const storageService = {
       return null;
     }
   },
-    async saveLabel(label: string) {
+
+  async saveLabel(label: string) {
     try {
-      let labels = await loadData<string[]>(STORAGE_KEYS.LABELS);
-      if (!Array.isArray(labels)) labels = [];
-
-      // add new label (keep unique)
+      let labels = (await loadData<string[]>(STORAGE_KEYS.LABELS)) || [];
       if (!labels.includes(label)) {
-        labels.unshift(label); // newest first
-        labels = labels.slice(0, 20); // limit to last 20
+        labels.unshift(label);
+        labels = labels.slice(0, 20);
       }
-
       await saveData(STORAGE_KEYS.LABELS, labels);
     } catch (error) {
       console.error("❌ Error saving label:", error);
@@ -152,12 +172,11 @@ export const storageService = {
 
   async getRecentLabels(): Promise<string[]> {
     try {
-      const labels = await loadData<string[]>(STORAGE_KEYS.LABELS);
-      return Array.isArray(labels) ? labels : [];
+      const labels = (await loadData<string[]>(STORAGE_KEYS.LABELS)) || [];
+      return labels;
     } catch (error) {
       console.error("❌ Error loading labels:", error);
       return [];
     }
   },
 };
-

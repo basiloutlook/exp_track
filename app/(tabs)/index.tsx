@@ -17,9 +17,13 @@ import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
 import DatePicker from '@/components/DatePicker';
 import Dropdown from '@/components/Dropdown';
 import LabelSelector from '@/components/LabelSelector';
+import {
+  addExpenseToGoogleSheet,
+  updateExpenseInGoogleSheet,
+} from '@/utils/googleSheets';
 
 export default function AddExpense() {
-  const { expense: expenseString } = useLocalSearchParams<{ expense?: string }>();
+  const params = useLocalSearchParams<{ expense?: string }>();
   const router = useRouter();
 
   const [expenseId, setExpenseId] = useState<string | null>(null);
@@ -34,9 +38,13 @@ export default function AddExpense() {
   const [labels, setLabels] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Store original values for comparison
+  const [originalExpense, setOriginalExpense] = useState<Expense | null>(null);
+
   const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
   const isEditMode = !!expenseId;
 
+  // ✅ Reset form fields
   const resetForm = () => {
     setExpenseId(null);
     setCategory('');
@@ -47,42 +55,61 @@ export default function AddExpense() {
     setPaymentMode('');
     setLabels([]);
     setDate(new Date());
-    // Do not reset email
+    setOriginalExpense(null);
   };
 
-  const handleCancel = useCallback(() => {
-    Alert.alert(
-      'Discard Changes?',
-      'Are you sure you want to discard your changes? This action cannot be undone.',
-      [
-        { text: 'Keep Editing', style: 'cancel' },
-        {
-          text: 'Discard',
-          style: 'destructive',
-          onPress: () => {
-            resetForm();
-            router.push('/dashboard');
-          },
-        },
-      ]
-    );
-  }, [router]);
+  // ✅ Load user email
+  const loadUserEmail = async () => {
+    const savedEmail = await storageService.getUserEmail();
+    if (savedEmail) setEmail(savedEmail);
+  };
 
+  // ✅ Check if current values differ from original
+  const hasChanges = useCallback(() => {
+    if (!originalExpense) return false;
+
+    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+      .toISOString()
+      .split('T')[0];
+
+    return (
+      email.trim() !== originalExpense.email ||
+      localDate !== originalExpense.date ||
+      category !== originalExpense.category ||
+      subCategory !== originalExpense.subCategory ||
+      item.trim() !== originalExpense.item ||
+      shopName.trim() !== (originalExpense.shopName || '') ||
+      Number(amount) !== originalExpense.amount ||
+      paymentMode !== originalExpense.paymentMode ||
+      JSON.stringify(labels.sort()) !== JSON.stringify((originalExpense.labels || []).sort())
+    );
+  }, [email, date, category, subCategory, item, shopName, amount, paymentMode, labels, originalExpense]);
+
+  // ✅ Handle screen focus (Edit / Add)
   useFocusEffect(
     useCallback(() => {
-      if (expenseString) {
-        const expenseToEdit = JSON.parse(expenseString);
-        setExpenseId(expenseToEdit.id);
-        setEmail(expenseToEdit.email);
-        setDate(new Date(expenseToEdit.date));
-        setCategory(expenseToEdit.category);
-        setSubCategory(expenseToEdit.subCategory);
-        setItem(expenseToEdit.item);
-        setShopName(expenseToEdit.shopName || '');
-        setAmount(String(expenseToEdit.amount));
-        setPaymentMode(expenseToEdit.paymentMode);
-        setLabels(expenseToEdit.labels || []);
+      // Only load expense data if params.expense exists
+      if (params.expense) {
+        try {
+          const expenseToEdit = JSON.parse(params.expense);
+          setExpenseId(expenseToEdit.id);
+          setEmail(expenseToEdit.email);
+          setDate(new Date(expenseToEdit.date));
+          setCategory(expenseToEdit.category);
+          setSubCategory(expenseToEdit.subCategory);
+          setItem(expenseToEdit.item);
+          setShopName(expenseToEdit.shopName || '');
+          setAmount(String(expenseToEdit.amount));
+          setPaymentMode(expenseToEdit.paymentMode);
+          setLabels(expenseToEdit.labels || []);
+          setOriginalExpense(expenseToEdit);
+        } catch (error) {
+          console.error('Error parsing expense:', error);
+          resetForm();
+          loadUserEmail();
+        }
       } else {
+        // No expense param - fresh form
         resetForm();
         loadUserEmail();
       }
@@ -90,31 +117,63 @@ export default function AddExpense() {
       const backAction = () => {
         if (isEditMode) {
           handleCancel();
-          return true; // Prevents default back button behavior
+          return true;
+        } else {
+          BackHandler.exitApp();
+          return true;
         }
-        // Let the default back button behavior happen
-        return false;
       };
 
-      const backHandler = BackHandler.addEventListener(
-        'hardwareBackPress',
-        backAction
-      );
-
+      const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
       return () => backHandler.remove();
-    }, [expenseString, isEditMode, handleCancel])
+    }, [params.expense])
   );
 
-  const loadUserEmail = async () => {
-    const savedEmail = await storageService.getUserEmail();
-    if (savedEmail) {
-      setEmail(savedEmail);
-    }
-  };
+  // ✅ Cancel edit confirmation
+  const handleCancel = useCallback(() => {
+    Alert.alert('Discard Changes?', 'Are you sure you want to discard your changes?', [
+      { text: 'Keep Editing', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: () => {
+          resetForm();
+          router.push('/dashboard');
+        },
+      },
+    ]);
+  }, [router]);
 
+  // ✅ Add or update expense
   const handleSubmit = async () => {
-    if (!email.trim() || !category || !subCategory || !item.trim() || !amount.trim() || isNaN(Number(amount)) || !paymentMode) {
+    if (
+      !email.trim() ||
+      !category ||
+      !subCategory ||
+      !item.trim() ||
+      !amount.trim() ||
+      isNaN(Number(amount)) ||
+      !paymentMode
+    ) {
       Alert.alert('Error', 'Please fill all required fields');
+      return;
+    }
+
+    // Check if editing and no changes made
+    if (isEditMode && !hasChanges()) {
+      Alert.alert(
+        'No Changes',
+        'No changes were made to this transaction.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              resetForm();
+              router.push('/dashboard');
+            },
+          },
+        ]
+      );
       return;
     }
 
@@ -123,9 +182,14 @@ export default function AddExpense() {
     try {
       await storageService.saveUserEmail(email);
 
+      // ✅ Fix for local date (no UTC shift)
+      const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+        .toISOString()
+        .split('T')[0];
+
       const expenseData: Omit<Expense, 'id' | 'timestamp'> = {
         email: email.trim(),
-        date: date.toISOString().split('T')[0],
+        date: localDate,
         category,
         subCategory,
         item: item.trim(),
@@ -136,26 +200,63 @@ export default function AddExpense() {
       };
 
       if (expenseId) {
-        // Update existing expense
-        const updatedExpense: Expense = { ...expenseData, id: expenseId, timestamp: new Date().toISOString() };
-        await storageService.updateExpense(updatedExpense);
-        Alert.alert('Success', 'Expense updated successfully!');
-        router.push('/dashboard');
-        resetForm(); // Reset form after successful update
+        // ✅ Update existing expense - ONLY UPDATE, DON'T ADD
+        const updatedExpense: Expense = {
+          ...expenseData,
+          id: expenseId,
+          timestamp: originalExpense?.timestamp || new Date().toISOString(),
+        };
+        
+        // Update in Google Sheet first
+        await updateExpenseInGoogleSheet(updatedExpense);
+        
+        // Then update locally (using updateExpense, NOT saveExpense)
+        await storageService.updateExpenseOnly(updatedExpense);
+        
+        Alert.alert(
+          'Success',
+          'Transaction updated successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                resetForm();
+                router.push('/dashboard');
+              },
+            },
+          ]
+        );
       } else {
-        // Add new expense
+        // ✅ Add new expense
         const newExpense: Expense = {
           ...expenseData,
           id: Date.now().toString(),
           timestamp: new Date().toISOString(),
         };
-        await storageService.saveExpense(newExpense);
-        Alert.alert('Success', 'Expense added successfully!');
-        resetForm();
+        
+        // Add to Google Sheet
+        await addExpenseToGoogleSheet(newExpense);
+        
+        // Add locally
+        await storageService.addExpenseOnly(newExpense);
+        
+        Alert.alert(
+          'Success',
+          'Expense added successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                resetForm();
+                router.push('/dashboard');
+              },
+            },
+          ]
+        );
       }
     } catch (error) {
-      Alert.alert('Error', `Failed to ${expenseId ? 'update' : 'save'} expense. Please try again.`);
-    } finally {
+      console.error('❌ Error saving expense:', error);
+      Alert.alert('Error', `Failed to ${expenseId ? 'update' : 'save'} expense.`);
       setIsSubmitting(false);
     }
   };
@@ -190,7 +291,7 @@ export default function AddExpense() {
             setSubCategory('');
           }}
           options={CATEGORIES}
-          placeholder="Select a category"
+          placeholder="Select category"
         />
       </View>
 
@@ -201,7 +302,7 @@ export default function AddExpense() {
             value={subCategory}
             onChange={setSubCategory}
             options={subCategoryOptions}
-            placeholder="Select a sub-category"
+            placeholder="Select sub-category"
           />
         </View>
       )}
@@ -255,9 +356,10 @@ export default function AddExpense() {
       <TouchableOpacity
         style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
         onPress={handleSubmit}
-        disabled={isSubmitting}>
+        disabled={isSubmitting}
+      >
         <Text style={styles.submitButtonText}>
-          {isSubmitting ? 'Saving...' : (isEditMode ? 'Update Expense' : 'Add Expense')}
+          {isSubmitting ? 'Saving...' : isEditMode ? 'Update Expense' : 'Add Expense'}
         </Text>
       </TouchableOpacity>
     </ScrollView>
