@@ -35,6 +35,38 @@ export default function AddExpense() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
+  const isEditMode = !!expenseId;
+
+  const resetForm = () => {
+    setExpenseId(null);
+    setCategory('');
+    setSubCategory('');
+    setItem('');
+    setShopName('');
+    setAmount('');
+    setPaymentMode('');
+    setLabels([]);
+    setDate(new Date());
+    // Do not reset email
+  };
+
+  const handleCancel = useCallback(() => {
+    Alert.alert(
+      'Discard Changes?',
+      'Are you sure you want to discard your changes? This action cannot be undone.',
+      [
+        { text: 'Keep Editing', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            resetForm();
+            router.push('/dashboard');
+          },
+        },
+      ]
+    );
+  }, [router]);
 
   useFocusEffect(
     useCallback(() => {
@@ -51,11 +83,26 @@ export default function AddExpense() {
         setPaymentMode(expenseToEdit.paymentMode);
         setLabels(expenseToEdit.labels || []);
       } else {
-        // When the screen is focused and we are not editing, reset the form.
         resetForm();
         loadUserEmail();
       }
-    }, [expenseString])
+
+      const backAction = () => {
+        if (isEditMode) {
+          handleCancel();
+          return true; // Prevents default back button behavior
+        }
+        // Let the default back button behavior happen
+        return false;
+      };
+
+      const backHandler = BackHandler.addEventListener(
+        'hardwareBackPress',
+        backAction
+      );
+
+      return () => backHandler.remove();
+    }, [expenseString, isEditMode, handleCancel])
   );
 
   const loadUserEmail = async () => {
@@ -63,19 +110,6 @@ export default function AddExpense() {
     if (savedEmail) {
       setEmail(savedEmail);
     }
-  };
-
-  const resetForm = () => {
-    setExpenseId(null);
-    setCategory('');
-    setSubCategory('');
-    setItem('');
-    setShopName('');
-    setAmount('');
-    setPaymentMode('');
-    setLabels([]);
-    setDate(new Date());
-    // Do not reset email
   };
 
   const handleSubmit = async () => {
@@ -107,6 +141,7 @@ export default function AddExpense() {
         await storageService.updateExpense(updatedExpense);
         Alert.alert('Success', 'Expense updated successfully!');
         router.push('/dashboard');
+        resetForm(); // Reset form after successful update
       } else {
         // Add new expense
         const newExpense: Expense = {
@@ -124,40 +159,6 @@ export default function AddExpense() {
       setIsSubmitting(false);
     }
   };
-
-  const isEditMode = !!expenseId;
-
-  const handleCancel = useCallback(() => {
-    Alert.alert(
-      'Discard Changes?',
-      'Are you sure you want to discard your changes? This action cannot be undone.',
-      [
-        { text: 'Keep Editing', style: 'cancel' },
-        {
-          text: 'Discard',
-          style: 'destructive',
-          onPress: () => router.push('/dashboard'),
-        },
-      ]
-    );
-  }, [router]);
-
-  useEffect(() => {
-    const backAction = () => {
-      if (isEditMode) {
-        handleCancel();
-        return true; // Prevents default back button behavior
-      }
-      return false; // Allows default behavior (exit app)
-    };
-
-    const backHandler = BackHandler.addEventListener(
-      'hardwareBackPress',
-      backAction
-    );
-
-    return () => backHandler.remove();
-  }, [isEditMode, handleCancel]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
