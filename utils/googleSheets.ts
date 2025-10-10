@@ -26,29 +26,32 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
 
     if (!Array.isArray(data)) return [];
 
-    return data.map((row: any, index: number) => ({
-      id: row.id || row.ID || row.Id || `sheet-${index + 1}`,
-      date: normalizeRowDate(row),
-      category: row.category || row.Category || "",
-      subCategory:
-        row.subCategory || row["Sub Category"] || row.subcategory || "",
-      item: row.item || row.Item || "",
-      amount: parseFloat(row.amount || row.Amount || 0) || 0,
-      email: row.email || row["Email Address"] || "",
-      shopName:
-        row.shopName || row.shop || row["Shop/Site/Person name"] || row.Shop || "",
-      paymentMode: row.paymentMode || row["Mode of payment"] || "",
-      labels:
-        typeof row.labels === "string"
-          ? row.labels
-              .split(",")
-              .map((l: string) => l.trim())
-              .filter(Boolean)
-          : Array.isArray(row.labels)
-          ? row.labels
-          : [],
-      timestamp: row.timestamp || row.Timestamp || "",
-    }));
+    return data.map((row: any, index: number) => {
+      const expense = {
+        id: row.id || row.ID || row.Id || `sheet-${index + 1}`,
+        date: normalizeRowDate(row),
+        category: row.category || row.Category || "",
+        subCategory:
+          row.subCategory || row["Sub Category"] || row.subcategory || "",
+        item: row.item || row.Item || "",
+        amount: parseFloat(row.amount || row.Amount || 0) || 0,
+        email: row.email || row["Email Address"] || "",
+        shopName:
+          row.shopName || row.shop || row["Shop/Site/Person name"] || row.Shop || "",
+        paymentMode: row.paymentMode || row["Mode of payment"] || "",
+        labels:
+          typeof row.labels === "string"
+            ? row.labels
+                .split(",")
+                .map((l: string) => l.trim())
+                .filter(Boolean)
+            : Array.isArray(row.labels)
+            ? row.labels
+            : [],
+        timestamp: row.timestamp || row.Timestamp || "",
+      };
+      return expense;
+    });
   } catch (error) {
     console.error("❌ Error fetching Google Sheet data:", error);
     return [];

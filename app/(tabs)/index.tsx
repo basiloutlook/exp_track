@@ -124,7 +124,7 @@ export default function AddExpense() {
 
       const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
       return () => backHandler.remove();
-    }, [params.expense, expenseId])
+    }, [params.expense])
   );
 
   // ✅ Cancel edit confirmation
@@ -136,7 +136,7 @@ export default function AddExpense() {
         style: 'destructive',
         onPress: () => {
           resetForm();
-          router.replace('/dashboard');
+          router.replace('/(tabs)/dashboard');
         },
       },
     ]);
@@ -167,7 +167,7 @@ export default function AddExpense() {
             text: 'OK',
             onPress: () => {
               resetForm();
-              router.replace('/dashboard');
+              router.replace('/(tabs)/dashboard');
             },
           },
         ]

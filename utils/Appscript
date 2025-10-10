@@ -2,33 +2,115 @@ function doPost(e) {
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
     const data = JSON.parse(e.postData.contents);
+    const action = data.action || 'add';
 
-    // ✅ Make sure all 10 fields are passed, even if empty
-    const row = [
-      new Date(), // Timestamp
-      data.date || "", // Date
-      data.category || "", // Category
-      data.subCategory || "", // ✅ Sub Category (must be included)
-      data.item || "", // Item
-      data.amount || "", // Amount
-      data.email || "", // Email Address
-      data.shop || "", // Shop/Site/Person name
-      data.paymentMode || "", // Mode of payment
-      Array.isArray(data.labels)
-        ? data.labels.join(", ")
-        : data.labels || "" // Labels
-    ];
+    if (action === 'add') {
+      // Add new expense
+      const row = [
+        data.id || "",           // ID (Column A)
+        new Date(),              // Timestamp (Column B)
+        data.date || "",         // Date (Column C)
+        data.category || "",     // Category (Column D)
+        data.subCategory || "",  // Sub Category (Column E)
+        data.item || "",         // Item (Column F)
+        data.amount || "",       // Amount (Column G)
+        data.email || "",        // Email Address (Column H)
+        data.shopName || "",     // Shop/Site/Person name (Column I)
+        data.paymentMode || "",  // Mode of payment (Column J)
+        Array.isArray(data.labels)
+          ? data.labels.join(", ")
+          : data.labels || ""    // Labels (Column K)
+      ];
 
-    sheet.appendRow(row);
+      sheet.appendRow(row);
 
-    return ContentService
-      .createTextOutput(
-        JSON.stringify({
-          success: true,
-          message: "Expense added successfully",
-        })
-      )
-      .setMimeType(ContentService.MimeType.JSON);
+      return ContentService
+        .createTextOutput(
+          JSON.stringify({
+            success: true,
+            message: "Expense added successfully",
+          })
+        )
+        .setMimeType(ContentService.MimeType.JSON);
+
+    } else if (action === 'update') {
+      // Update existing expense by ID
+      const allData = sheet.getDataRange().getValues();
+      const headers = allData[0];
+      const idColumnIndex = 0; // ID is in column A (index 0)
+
+      let rowIndex = -1;
+      for (let i = 1; i < allData.length; i++) {
+        if (allData[i][idColumnIndex] == data.id) {
+          rowIndex = i + 1; // Sheet rows are 1-indexed
+          break;
+        }
+      }
+
+      if (rowIndex === -1) {
+        throw new Error("Expense ID not found: " + data.id);
+      }
+
+      // Update the row (keep ID and original timestamp)
+      const existingId = sheet.getRange(rowIndex, 1).getValue();
+      const existingTimestamp = sheet.getRange(rowIndex, 2).getValue();
+
+      sheet.getRange(rowIndex, 1, 1, 11).setValues([[
+        existingId,              // ID (Column A) - keep original
+        existingTimestamp,       // Timestamp (Column B) - keep original
+        data.date || "",         // Date (Column C)
+        data.category || "",     // Category (Column D)
+        data.subCategory || "",  // Sub Category (Column E)
+        data.item || "",         // Item (Column F)
+        data.amount || "",       // Amount (Column G)
+        data.email || "",        // Email Address (Column H)
+        data.shopName || "",     // Shop/Site/Person name (Column I)
+        data.paymentMode || "",  // Mode of payment (Column J)
+        Array.isArray(data.labels)
+          ? data.labels.join(", ")
+          : data.labels || ""    // Labels (Column K)
+      ]]);
+
+      return ContentService
+        .createTextOutput(
+          JSON.stringify({
+            success: true,
+            message: "Expense updated successfully",
+          })
+        )
+        .setMimeType(ContentService.MimeType.JSON);
+
+    } else if (action === 'delete') {
+      // Delete expense by ID
+      const allData = sheet.getDataRange().getValues();
+      const idColumnIndex = 0;
+
+      let rowIndex = -1;
+      for (let i = 1; i < allData.length; i++) {
+        if (allData[i][idColumnIndex] == data.id) {
+          rowIndex = i + 1;
+          break;
+        }
+      }
+
+      if (rowIndex === -1) {
+        throw new Error("Expense ID not found: " + data.id);
+      }
+
+      sheet.deleteRow(rowIndex);
+
+      return ContentService
+        .createTextOutput(
+          JSON.stringify({
+            success: true,
+            message: "Expense deleted successfully",
+          })
+        )
+        .setMimeType(ContentService.MimeType.JSON);
+
+    } else {
+      throw new Error("Invalid action: " + action);
+    }
 
   } catch (error) {
     return ContentService
@@ -42,27 +124,28 @@ function doPost(e) {
   }
 }
 
-// ✅ Fetch all data (including Labels)
+// Fetch all data (including ID and all fields)
 function doGet(e) {
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
-    const data = sheet.getDataRange().getValues(); // all rows
+    const data = sheet.getDataRange().getValues();
 
     // Assume first row is header
     const headers = data[0];
     const rows = data.slice(1);
 
     const expenses = rows.map(r => ({
-      timestamp: r[0],
-      date: r[1],
-      category: r[2],
-      subCategory: r[3], // ✅ Added
-     item: r[4],
-      amount: r[5],
-      email: r[6],
-      shop: r[7],
-      paymentMode: r[8],
-      labels: r[9] ? r[9].split(",").map(s => s.trim()).filter(Boolean) : []
+      id: r[0],              // ID (Column A)
+      timestamp: r[1],       // Timestamp (Column B)
+      date: r[2],            // Date (Column C)
+      category: r[3],        // Category (Column D)
+      subCategory: r[4],     // Sub Category (Column E)
+      item: r[5],            // Item (Column F)
+      amount: r[6],          // Amount (Column G)
+      email: r[7],           // Email Address (Column H)
+      shopName: r[8],        // Shop/Site/Person name (Column I)
+      paymentMode: r[9],     // Mode of payment (Column J)
+      labels: r[10] ? r[10].split(",").map(s => s.trim()).filter(Boolean) : [] // Labels (Column K)
     }));
 
     return ContentService

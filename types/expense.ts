@@ -2,7 +2,7 @@ export interface Expense {
   id: string;
   date: string;
   category: string;
-  subCategory?: string; // ✅ New
+  subCategory: string;
   item: string;
   amount: number;
   email: string;
