@@ -8,7 +8,7 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
 import { PAYMENT_MODES, Expense } from '@/types/expense';
 import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
@@ -18,7 +18,7 @@ import LabelSelector from '@/components/LabelSelector';
 
 export default function AddExpense() {
   const { expense: expenseString } = useLocalSearchParams<{ expense?: string }>();
-  const navigation = useNavigation();
+  const router = useRouter();
 
   const [expenseId, setExpenseId] = useState<string | null>(null);
   const [email, setEmail] = useState('');
@@ -100,7 +100,7 @@ export default function AddExpense() {
         const updatedExpense: Expense = { ...expenseData, id: expenseId, timestamp: new Date().toISOString() };
         await storageService.updateExpense(updatedExpense);
         Alert.alert('Success', 'Expense updated successfully!');
-        navigation.goBack();
+        router.push('/dashboard');
       } else {
         // Add new expense
         const newExpense: Expense = {
@@ -119,11 +119,32 @@ export default function AddExpense() {
     }
   };
 
+  const handleCancel = () => {
+    Alert.alert(
+      'Discard Changes?',
+      'Are you sure you want to discard your changes? This action cannot be undone.',
+      [
+        { text: 'Keep Editing', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => router.push('/dashboard'),
+        },
+      ]
+    );
+  };
+
   const isEditMode = !!expenseId;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <Text style={styles.title}>{isEditMode ? 'Edit Expense' : 'Add Expense'}</Text>
+
+      {isEditMode && (
+        <TouchableOpacity onPress={handleCancel} style={styles.cancelButton}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>Email *</Text>
@@ -226,6 +247,18 @@ export default function AddExpense() {
 }
 
 const styles = StyleSheet.create({
+  cancelButton: {
+    position: 'absolute',
+    top: 28,
+    right: 20,
+    padding: 8,
+    backgroundColor: '#fee2e2',
+    borderRadius: 8,
+  },
+  cancelButtonText: {
+    color: '#ef4444',
+    fontWeight: '600',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',
