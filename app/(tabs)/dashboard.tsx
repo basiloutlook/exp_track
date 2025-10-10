@@ -414,7 +414,7 @@ export default function Dashboard() {
   // This drill-down state is set by clicking a BarChart item
   const [drillDownDateFilter, setDrillDownDateFilter] = useState<{ startDate: Date, endDate: Date } | null>(null);
 
-  const navigation = useNavigation();
+  const router = useRouter();
 
   const loadExpenses = useCallback(async () => {
     setIsLoading(true);
@@ -465,9 +465,10 @@ export default function Dashboard() {
   // --- END MODIFICATION 3 ---
   
   const handleEditExpense = (expense: Expense) => {
-    // Navigate to the 'Add Expense' screen (route name 'index') and pass the expense data
-    // The `as never` is used to bypass TypeScript errors since the navigator is not strongly typed here
-    navigation.navigate('index' as never, { expense: JSON.stringify(expense) } as never);
+    router.push({
+      pathname: '/',
+      params: { expense: JSON.stringify(expense) },
+    });
   };
 
   const handleApplyFilters = (newFilters: any) => {
