@@ -1,69 +1,164 @@
-import { Share, Platform } from 'react-native';
-import { storageService } from './storage';
+import { Expense } from "@/types/expense";
 
-export const googleSheetsService = {
-  /**
-   * Import data from a Google Sheet that has been published as CSV.
-   * csvUrl should be the published CSV link (see getInstructions below).
-   */
-  async importFromPublishedSheet(csvUrl: string, overwrite = true): Promise<void> {
-    try {
-      await storageService.importFromCSVUrl(csvUrl, overwrite);
-    } catch (error) {
-      console.error('Error importing from published sheet:', error);
-      throw error;
-    }
-  },
+const GOOGLE_SHEET_URL =
+  "https://script.google.com/macros/s/AKfycby0W_NemJENrAyV_U3W7sqVAozLqXLRyUm_TTn1te4aWGi4ZN8AJz8VuPavfN8KxD4C/exec";
 
-  /**
-   * Import from an Apps Script Web App endpoint that returns JSON for the sheet.
-   * Use this when you deploy an Apps Script that reads the sheet and returns a JSON array.
-   */
-  async importFromAppsScript(jsonUrl: string, overwrite = true): Promise<void> {
-    try {
-      await storageService.importFromJsonUrl(jsonUrl, overwrite);
-    } catch (error) {
-      console.error('Error importing from Apps Script:', error);
-      throw error;
-    }
-  },
-  async exportToCSV(): Promise<void> {
-    try {
-      const csv = await storageService.exportToCSV();
+/**
+ * Normalize Google Sheet date fields to prevent 1-day shift.
+ * Ensures date is treated as a plain local date (not UTC midnight).
+ */
+function normalizeRowDate(raw: any): string {
+  const d = raw?.date || raw?.Date || "";
+  if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    // interpret as local date
+    return d;
+  }
+  return d || "";
+}
 
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `expenses_${new Date().toISOString().split('T')[0]}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      } else {
-        await Share.share({
-          message: csv,
-          title: 'Expense Report CSV',
-        });
-      }
-    } catch (error) {
-      console.error('Error exporting to CSV:', error);
-      throw error;
-    }
-  },
+/**
+ * Fetch all expenses from Google Sheet.
+ */
+export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
+  try {
+    const response = await fetch(GOOGLE_SHEET_URL);
+    const data = await response.json();
 
-  getInstructions(): string {
-    return `To import this data into Google Sheets:
+    if (!Array.isArray(data)) return [];
 
-1. Export the CSV file using the Export button in the Dashboard
-2. Open Google Sheets (sheets.google.com)
-3. Create a new spreadsheet or open an existing one
-4. Go to File > Import
-5. Choose the CSV file you exported
-6. Select "Insert new sheet(s)" or "Replace spreadsheet"
-7. Click "Import data"
+    return data.map((row: any, index: number) => ({
+      id: row.id || row.ID || row.Id || `sheet-${index + 1}`,
+      date: normalizeRowDate(row),
+      category: row.category || row.Category || "",
+      subCategory:
+        row.subCategory || row["Sub Category"] || row.subcategory || "",
+      item: row.item || row.Item || "",
+      amount: parseFloat(row.amount || row.Amount || 0) || 0,
+      email: row.email || row["Email Address"] || "",
+      shopName:
+        row.shopName || row.shop || row["Shop/Site/Person name"] || row.Shop || "",
+      paymentMode: row.paymentMode || row["Mode of payment"] || "",
+      labels:
+        typeof row.labels === "string"
+          ? row.labels
+              .split(",")
+              .map((l: string) => l.trim())
+              .filter(Boolean)
+          : Array.isArray(row.labels)
+          ? row.labels
+          : [],
+      timestamp: row.timestamp || row.Timestamp || "",
+    }));
+  } catch (error) {
+    console.error("❌ Error fetching Google Sheet data:", error);
+    return [];
+  }
+}
 
-The CSV format matches the structure of your expense tracking form.`;
-  },
-};
+/**
+ * Add a new expense record to Google Sheet.
+ */
+export async function addExpenseToGoogleSheet(
+  expense: Expense
+): Promise<void> {
+  try {
+    const payload = {
+      action: "add",
+      id: expense.id,
+      email: expense.email,
+      date: expense.date,
+      category: expense.category,
+      subCategory: expense.subCategory,
+      item: expense.item,
+      shopName: expense.shopName || "",
+      amount: expense.amount,
+      paymentMode: expense.paymentMode,
+      labels: Array.isArray(expense.labels)
+        ? expense.labels.join(", ")
+        : expense.labels || "",
+      timestamp: expense.timestamp,
+    };
+
+    console.log("📤 Sending ADD request to Google Sheet:", payload);
+
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+    if (!result.success) throw new Error(result.message || "Failed to add");
+    console.log("✅ Added to Google Sheet:", result.message || "");
+  } catch (error) {
+    console.error("❌ Error adding to Google Sheet:", error);
+    throw error;
+  }
+}
+
+/**
+ * Update an existing expense record by ID.
+ */
+export async function updateExpenseInGoogleSheet(
+  expense: Expense
+): Promise<void> {
+  try {
+    const payload = {
+      action: "update",
+      id: expense.id,
+      email: expense.email,
+      date: expense.date,
+      category: expense.category,
+      subCategory: expense.subCategory,
+      item: expense.item,
+      shopName: expense.shopName || "",
+      amount: expense.amount,
+      paymentMode: expense.paymentMode,
+      labels: Array.isArray(expense.labels)
+        ? expense.labels.join(", ")
+        : expense.labels || "",
+      timestamp: expense.timestamp,
+    };
+
+    console.log("📤 Sending UPDATE request to Google Sheet:", payload);
+
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+    if (!result.success)
+      throw new Error(result.message || "Failed to update expense");
+    console.log("✅ Updated expense in Google Sheet:", result.message || "");
+  } catch (error) {
+    console.error("❌ Error updating expense in Google Sheet:", error);
+    throw error;
+  }
+}
+
+/**
+ * Delete an expense record from Google Sheet by ID.
+ */
+export async function deleteExpenseFromGoogleSheet(id: string): Promise<void> {
+  try {
+    const payload = { action: "delete", id };
+    
+    console.log("📤 Sending DELETE request to Google Sheet:", payload);
+    
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await response.json();
+    if (!result.success)
+      throw new Error(result.message || "Failed to delete expense");
+    console.log("🗑️ Deleted expense from Google Sheet:", id);
+  } catch (error) {
+    console.error("❌ Error deleting expense from Google Sheet:", error);
+    throw error;
+  }
+}

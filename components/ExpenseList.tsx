@@ -5,9 +5,10 @@ import { Trash2 } from 'lucide-react-native';
 interface ExpenseListProps {
   expenses: Expense[];
   onDelete: (id: string) => void;
+  onEdit?: (expense: Expense) => void;
 }
 
-export default function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
+export default function ExpenseList({ expenses, onDelete, onEdit }: ExpenseListProps) {
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -28,11 +29,14 @@ export default function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
       {expenses.map((expense) => (
         <View key={expense.id} style={styles.expenseItem}>
           <View style={styles.expenseMain}>
-            <View style={styles.expenseLeft}>
-              <Text style={styles.expenseItem_name}>{expense.item}</Text>
-              <Text style={styles.expenseCategory}>{expense.category}</Text>
-              <Text style={styles.expenseDate}>{formatDate(expense.date)}</Text>
-            </View>
+              <View style={styles.expenseLeft}>
+                <Text style={styles.expenseItem_name}>{expense.item}</Text>
+                <Text style={styles.expenseCategory}>
+                  {expense.category}
+                  {expense.subCategory ? ` • ${expense.subCategory}` : ''}
+                </Text>
+                <Text style={styles.expenseDate}>{formatDate(expense.date)}</Text>
+              </View>
             <View style={styles.expenseRight}>
               <Text style={styles.expenseAmount}>₹{expense.amount.toFixed(2)}</Text>
               <Text style={styles.expensePayment}>{expense.paymentMode}</Text>
@@ -41,20 +45,30 @@ export default function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
           {expense.shopName && (
             <Text style={styles.expenseShop}>{expense.shopName}</Text>
           )}
-          {expense.labels.length > 0 && (
+          {(expense.labels?.length ?? 0) > 0 && (
             <View style={styles.labelsContainer}>
-              {expense.labels.map((label) => (
+              {(expense.labels ?? []).map((label) => (
                 <View key={label} style={styles.label}>
                   <Text style={styles.labelText}>{label}</Text>
                 </View>
               ))}
             </View>
           )}
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => onDelete(expense.id)}>
-            <Trash2 size={16} color="#ef4444" />
-          </TouchableOpacity>
+
+          <View style={styles.actionButtons}>
+            {onEdit && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => onEdit && onEdit(expense)}>
+                <Text style={styles.editText}>Edit</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => onDelete(expense.id)}>
+              <Trash2 size={16} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
         </View>
       ))}
     </View>
@@ -129,10 +143,26 @@ const styles = StyleSheet.create({
     color: '#3730a3',
   },
   deleteButton: {
+    padding: 4,
+  },
+  actionButtons: {
     position: 'absolute',
     top: 8,
     right: 8,
-    padding: 4,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  actionButton: {
+    backgroundColor: '#eef2ff',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  editText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '600',
   },
   emptyText: {
     fontSize: 14,
