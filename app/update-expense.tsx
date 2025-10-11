@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -12,18 +12,14 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
-import { PAYMENT_MODES, Expense } from '@/types/expense';
-import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
+import { updateExpenseInGoogleSheet } from '@/utils/googleSheets';
+import { Expense } from '@/types/expense';
 import DatePicker from '@/components/DatePicker';
 import Dropdown from '@/components/Dropdown';
 import LabelSelector from '@/components/LabelSelector';
-import {
-  addExpenseToGoogleSheet,
-  updateExpenseInGoogleSheet,
-  deleteExpenseFromGoogleSheet as deleteExpenseFromGoogleSheetApi,
-} from '@/utils/googleSheets';
+import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
 
-export default function AddExpense() {
+export default function UpdateExpense() {
   const params = useLocalSearchParams<{ expense?: string }>();
   const router = useRouter();
 
@@ -38,15 +34,11 @@ export default function AddExpense() {
   const [paymentMode, setPaymentMode] = useState('');
   const [labels, setLabels] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Store original values for comparison
   const [originalExpense, setOriginalExpense] = useState<Expense | null>(null);
 
   const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
-  const isEditMode = !!expenseId;
 
-  // ✅ Reset form fields
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setExpenseId(null);
     setCategory('');
     setSubCategory('');
@@ -57,15 +49,8 @@ export default function AddExpense() {
     setLabels([]);
     setDate(new Date());
     setOriginalExpense(null);
-  };
+  }, []);
 
-  // ✅ Load user email
-  const loadUserEmail = async () => {
-    const savedEmail = await storageService.getUserEmail();
-    if (savedEmail) setEmail(savedEmail);
-  };
-
-  // ✅ Check if current values differ from original
   const hasChanges = useCallback(() => {
     if (!originalExpense) return false;
 
@@ -86,9 +71,10 @@ export default function AddExpense() {
     );
   }, [email, date, category, subCategory, item, shopName, amount, paymentMode, labels, originalExpense]);
 
-  // ✅ Handle screen focus (Edit / Add)
+  // ✅ FIXED useFocusEffect (no dependency on hasChanges or states)
   useFocusEffect(
     useCallback(() => {
+      // This effect only depends on params.expense (static) and router (stable)
       if (params.expense) {
         try {
           const expenseToEdit = JSON.parse(params.expense);
@@ -105,43 +91,35 @@ export default function AddExpense() {
           setOriginalExpense(expenseToEdit);
         } catch (error) {
           console.error('Error parsing expense:', error);
-          resetForm(); // Reset form on error
-          loadUserEmail();
+          resetForm();
         }
-      } else {
-        resetForm(); // ✅ Reset form when no expense param
-        loadUserEmail();
       }
 
       const backAction = () => {
-        if (expenseId) {
-          handleCancel();
+        // Call hasChanges() here safely
+        if (hasChanges()) {
+          Alert.alert('', 'Do you want to keep editing or discard changes?', [
+            { text: 'Keep Editing', style: 'cancel' },
+            {
+              text: 'Discard',
+              style: 'destructive',
+              onPress: () => {
+                resetForm();
+                router.replace('/(tabs)/dashboard');
+              },
+            },
+          ]);
           return true;
         }
         return false;
       };
 
       const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+
       return () => backHandler.remove();
-    }, [params.expense])
+    }, [params.expense, router, resetForm]) // ✅ Removed hasChanges dependency
   );
 
-  // ✅ Cancel edit confirmation
-  const handleCancel = useCallback(() => {
-    Alert.alert('', 'Do you want to keep editing or discard changes?', [
-      { text: 'Keep Editing', style: 'cancel' },
-      {
-        text: 'Discard',
-        style: 'destructive',
-        onPress: () => {
-          resetForm();
-          router.replace('/(tabs)/dashboard');
-        },
-      },
-    ]);
-  }, [router]);
-
-  // ✅ Add or update expense
   const handleSubmit = async () => {
     if (
       !email.trim() ||
@@ -156,35 +134,20 @@ export default function AddExpense() {
       return;
     }
 
-    // Check if editing and no changes made
-    if (isEditMode && !hasChanges()) {
-      Alert.alert(
-        'No Changes',
-        'No changes were made to this transaction.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              resetForm();
-              router.replace('/(tabs)/dashboard');
-            },
-          },
-        ]
-      );
+    if (!hasChanges()) {
+      Alert.alert('No Changes', 'No changes were made to this transaction.');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      await storageService.saveUserEmail(email);
-
-      // ✅ Fix for local date (no UTC shift)
       const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
         .toISOString()
         .split('T')[0];
 
-      const expenseData: Omit<Expense, 'id' | 'timestamp'> = {
+      const updatedExpense: Expense = {
+        id: expenseId!,
         email: email.trim(),
         date: localDate,
         category,
@@ -194,68 +157,31 @@ export default function AddExpense() {
         amount: Number(amount),
         paymentMode,
         labels,
+        timestamp: originalExpense?.timestamp || new Date().toISOString(),
       };
 
-      if (expenseId) {
-        // ✅ Update existing expense
-        const updatedExpense: Expense = {
-          ...expenseData,
-          id: expenseId,
-          timestamp: originalExpense?.timestamp || new Date().toISOString(),
-        };
+      await updateExpenseInGoogleSheet(updatedExpense);
 
-        await updateExpenseInGoogleSheet(updatedExpense); // Update in Google Sheet
-        await storageService.updateExpenseOnly(updatedExpense); // ✅ Update locally
-
-        Alert.alert(
-          'Success',
-          'Transaction updated successfully!',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                resetForm();
-                router.push('/dashboard');
-              },
-            },
-          ]
-        );
-      } else {
-        // ✅ Add new expense
-        const newExpense: Expense = {
-          ...expenseData,
-          id: Date.now().toString(),
-          timestamp: new Date().toISOString(),
-        };
-
-        await addExpenseToGoogleSheet(newExpense); // Add to Google Sheet
-        await storageService.addExpenseOnly(newExpense); // ✅ Add locally
-
-        Alert.alert(
-          'Success',
-          'Expense added successfully!',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                resetForm();
-                setIsSubmitting(false);
-                router.push('/dashboard');
-              },
-            },
-          ]
-        );
-      }
+      Alert.alert('Success', 'Transaction updated successfully!', [
+        {
+          text: 'OK',
+          onPress: () => {
+            resetForm();
+            router.replace('/(tabs)/dashboard');
+          },
+        },
+      ]);
     } catch (error) {
-      console.error('❌ Error saving expense:', error);
-      Alert.alert('Error', `Failed to ${expenseId ? 'update' : 'save'} expense.`);
+      console.error('❌ Error updating expense:', error);
+      Alert.alert('Error', 'Failed to update expense. Please try again.');
+    } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.title}>{isEditMode ? 'Edit Expense' : 'Add Expense'}</Text>
+      <Text style={styles.title}>Update Expense</Text>
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>Email *</Text>
@@ -335,7 +261,7 @@ export default function AddExpense() {
         <Dropdown
           value={paymentMode}
           onChange={setPaymentMode}
-          options={PAYMENT_MODES}
+          options={['Cash', 'Card', 'Online']}
           placeholder="Select payment mode"
         />
       </View>
@@ -351,7 +277,7 @@ export default function AddExpense() {
         disabled={isSubmitting}
       >
         <Text style={styles.submitButtonText}>
-          {isSubmitting ? 'Saving...' : isEditMode ? 'Update Expense' : 'Add Expense'}
+          {isSubmitting ? 'Saving...' : 'Update Expense'}
         </Text>
       </TouchableOpacity>
     </ScrollView>
@@ -408,26 +334,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
-// Define the Google Sheet API URL
-const GOOGLE_SHEET_URL = 'https://script.google.com/macros/s/AKfycby0W_NemJENrAyV_U3W7sqVAozLqXLRyUm_TTn1te4aWGi4ZN8AJz8VuPavfN8KxD4C/exec'; // <-- Replace with your actual URL
-
-export async function deleteExpenseFromGoogleSheetLocal(id: string): Promise<void> {
-  try {
-    const payload = { action: 'delete', id }; // Ensure correct payload
-    console.log('📤 Sending DELETE request to Google Sheet:', payload);
-
-    const response = await fetch(GOOGLE_SHEET_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const result = await response.json();
-    if (!result.success) throw new Error(result.message || 'Failed to delete expense');
-    console.log('🗑️ Deleted expense from Google Sheet:', id);
-  } catch (error) {
-    console.error('❌ Error deleting expense from Google Sheet:', error);
-    throw error;
-  }
-}

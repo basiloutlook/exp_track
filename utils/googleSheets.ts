@@ -1,7 +1,7 @@
 import { Expense } from "@/types/expense";
 
 const GOOGLE_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycby0W_NemJENrAyV_U3W7sqVAozLqXLRyUm_TTn1te4aWGi4ZN8AJz8VuPavfN8KxD4C/exec";
+  "https://script.google.com/macros/s/AKfycbzuMYinNGX2OmcMPNXpd9HdBOkOxNveYSt3KtXmnVVuKA4VDuoG-5Vf781HwFNE4x7b/exec";
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.
@@ -106,8 +106,12 @@ export async function updateExpenseInGoogleSheet(
   expense: Expense
 ): Promise<void> {
   try {
+    // Step 1: Delete the existing record
+    await deleteExpenseFromGoogleSheet(expense.id);
+
+    // Step 2: Add the updated record
     const payload = {
-      action: "update",
+      action: "add",
       id: expense.id,
       email: expense.email,
       date: expense.date,
@@ -123,7 +127,7 @@ export async function updateExpenseInGoogleSheet(
       timestamp: expense.timestamp,
     };
 
-    console.log("📤 Sending UPDATE request to Google Sheet:", payload);
+    console.log("📤 Sending ADD request to Google Sheet after deletion:", payload);
 
     const response = await fetch(GOOGLE_SHEET_URL, {
       method: "POST",
@@ -146,22 +150,20 @@ export async function updateExpenseInGoogleSheet(
  */
 export async function deleteExpenseFromGoogleSheet(id: string): Promise<void> {
   try {
-    const payload = { action: "delete", id };
-    
-    console.log("📤 Sending DELETE request to Google Sheet:", payload);
-    
+    const payload = { action: 'delete', id }; // Ensure correct payload
+    console.log('📤 Sending DELETE request to Google Sheet:', payload);
+
     const response = await fetch(GOOGLE_SHEET_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     const result = await response.json();
-    if (!result.success)
-      throw new Error(result.message || "Failed to delete expense");
-    console.log("🗑️ Deleted expense from Google Sheet:", id);
+    if (!result.success) throw new Error(result.message || 'Failed to delete expense');
+    console.log('🗑️ Deleted expense from Google Sheet:', id);
   } catch (error) {
-    console.error("❌ Error deleting expense from Google Sheet:", error);
+    console.error('❌ Error deleting expense from Google Sheet:', error);
     throw error;
   }
 }

@@ -444,28 +444,16 @@ export default function Dashboard() {
     'Delete Expense',
     'Are you sure you want to delete this expense? This action cannot be undone.',
     [
-      {
-        text: 'Cancel',
-        style: 'cancel',
-      },
+      { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
           try {
             console.log(`🗑️ Starting delete for ID: ${id}`);
-            
-            // 1. Delete from Google Sheet first
-            await deleteExpenseFromGoogleSheet(id);
-            console.log(`✅ Deleted from Google Sheet: ${id}`);
-            
-            // 2. Delete locally
-            await storageService.deleteExpense(id);
-            console.log(`✅ Deleted locally: ${id}`);
-            
-            // 3. Refresh the list from Google Sheet
-            await loadExpenses();
-            
+            await deleteExpenseFromGoogleSheet(id); // Delete from Google Sheet
+            await storageService.deleteExpense(id); // Delete locally
+            await loadExpenses(); // ✅ Refresh the list
             Alert.alert('Success', 'Expense deleted successfully!');
           } catch (error) {
             console.error('❌ Error deleting expense:', error);
@@ -478,9 +466,9 @@ export default function Dashboard() {
 };
 
 const handleEditExpense = (expense: Expense) => {
-  // Navigate to Add Expense page with expense data
+  // Navigate to Update Expense page with expense data
   router.push({
-    pathname: '/(tabs)/',
+    pathname: '/update-expense', // Navigate directly to the hidden update-expense page
     params: { expense: JSON.stringify(expense) },
   });
 };
