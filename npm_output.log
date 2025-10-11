@@ -1,0 +1,5 @@
+
+> expense-tracker@1.0.0 dev
+> cross-env EXPO_NO_TELEMETRY=1 expo start
+
+Starting project at /app

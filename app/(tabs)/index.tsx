@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,8 +7,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  BackHandler,
 } from 'react-native';
+import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { storageService } from '@/utils/storage';
+import { addExpenseToGoogleSheet, updateExpenseInGoogleSheet } from '@/utils/googleSheets';
 import { PAYMENT_MODES, Expense } from '@/types/expense';
 import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
 import DatePicker from '@/components/DatePicker';
@@ -26,8 +29,31 @@ export default function AddExpense() {
   const [paymentMode, setPaymentMode] = useState('');
   const [labels, setLabels] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const originalExpense = useRef<Expense | null>(null);
+
+  const router = useRouter();
+  const navigation = useNavigation();
+  const params = useLocalSearchParams();
 
   const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
+
+  useEffect(() => {
+    if (params.expense) {
+      const expenseToEdit = JSON.parse(params.expense as string);
+      originalExpense.current = expenseToEdit;
+      setIsEditMode(true);
+      setEmail(expenseToEdit.email);
+      setDate(new Date(expenseToEdit.date));
+      setCategory(expenseToEdit.category);
+      setSubCategory(expenseToEdit.subCategory);
+      setItem(expenseToEdit.item);
+      setShopName(expenseToEdit.shopName);
+      setAmount(expenseToEdit.amount.toString());
+      setPaymentMode(expenseToEdit.paymentMode);
+      setLabels(expenseToEdit.labels || []);
+    }
+  }, [params.expense]);
 
   useEffect(() => {
     loadUserEmail();
@@ -90,28 +116,157 @@ export default function AddExpense() {
         timestamp: new Date().toISOString(),
       };
 
-      await storageService.saveExpense(expense);
+      if (isEditMode && originalExpense.current) {
+        const updatedExpense: Expense = {
+          ...originalExpense.current,
+          email: email.trim(),
+          date: date.toISOString().split('T')[0],
+          category,
+          subCategory,
+          item: item.trim(),
+          shopName: shopName.trim(),
+          amount: Number(amount),
+          paymentMode,
+          labels,
+        };
 
-      Alert.alert('Success', 'Expense added successfully!');
+        const hasChanged = (() => {
+          const original = originalExpense.current;
+          if (!original) return true;
 
-      setCategory('');
-      setSubCategory('');
-      setItem('');
-      setShopName('');
-      setAmount('');
-      setPaymentMode('');
-      setLabels([]);
-      setDate(new Date());
+          // Compare arrays with JSON.stringify for a simple deep-ish comparison
+          if (JSON.stringify(updatedExpense.labels) !== JSON.stringify(original.labels)) {
+            return true;
+          }
+
+          // Compare other properties
+          return Object.keys(updatedExpense).some(key => {
+            const typedKey = key as keyof Expense;
+            if (typedKey === 'labels') return false; // Already checked
+            return updatedExpense[typedKey] !== original[typedKey];
+          });
+        })();
+
+        if (!hasChanged) {
+          Alert.alert('No Changes', 'You haven\'t made any changes.', [
+            { text: 'OK', onPress: () => router.push('/dashboard') },
+          ]);
+          setIsSubmitting(false);
+          return;
+        }
+
+        await updateExpenseInGoogleSheet(updatedExpense);
+        await storageService.updateExpense(updatedExpense);
+        Alert.alert('Success', 'Expense updated successfully!', [
+          { text: 'OK', onPress: () => router.push('/dashboard') },
+        ]);
+      } else {
+        const newExpense: Expense = {
+          id: Date.now().toString(),
+          email: email.trim(),
+          date: date.toISOString().split('T')[0],
+          category,
+          subCategory,
+          item: item.trim(),
+          shopName: shopName.trim(),
+          amount: Number(amount),
+          paymentMode,
+          labels,
+          timestamp: new Date().toISOString(),
+        };
+        await addExpenseToGoogleSheet(newExpense);
+        await storageService.saveExpense(newExpense);
+        Alert.alert('Success', 'Expense added successfully!');
+        resetForm();
+      }
     } catch (error) {
-      Alert.alert('Error', 'Failed to save expense. Please try again.');
+      Alert.alert('Error', `Failed to ${isEditMode ? 'update' : 'save'} expense. Please try again.`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const resetForm = () => {
+    setIsEditMode(false);
+    originalExpense.current = null;
+    setEmail('');
+    setDate(new Date());
+    setCategory('');
+    setSubCategory('');
+    setItem('');
+    setShopName('');
+    setAmount('');
+    setPaymentMode('');
+    setLabels([]);
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (!isEditMode) {
+        return;
+      }
+
+      const currentExpenseForComparison: Partial<Expense> = {
+        email: email.trim(),
+        date: date.toISOString().split('T')[0],
+        category,
+        subCategory,
+        item: item.trim(),
+        shopName: shopName.trim(),
+        amount: Number(amount),
+        paymentMode,
+        labels,
+      };
+
+      const hasChanged = originalExpense.current && Object.keys(currentExpenseForComparison).some(key => {
+        const typedKey = key as keyof Expense;
+        const formValue = currentExpenseForComparison[typedKey];
+        const originalValue = originalExpense.current![typedKey];
+
+        if (typedKey === 'labels') {
+          return JSON.stringify(formValue) !== JSON.stringify(originalValue);
+        }
+
+        return formValue !== originalValue;
+      });
+
+      if (!hasChanged) {
+        return;
+      }
+
+      e.preventDefault();
+
+      Alert.alert(
+        'Discard changes?',
+        'You have unsaved changes. Are you sure you want to discard them?',
+        [
+          { text: "Keep Editing", style: 'cancel', onPress: () => {} },
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => {
+              resetForm();
+              navigation.dispatch(e.data.action);
+            },
+          },
+        ]
+      );
+    });
+
+    return unsubscribe;
+  }, [navigation, isEditMode, email, date, category, subCategory, item, shopName, amount, paymentMode, labels]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('blur', () => {
+      resetForm();
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.title}>Add Expense</Text>
+      <Text style={styles.title}>{isEditMode ? 'Edit Expense' : 'Add Expense'}</Text>
 
       <View style={styles.formGroup}>
         <Text style={styles.label}>Email *</Text>
@@ -206,7 +361,7 @@ export default function AddExpense() {
         onPress={handleSubmit}
         disabled={isSubmitting}>
         <Text style={styles.submitButtonText}>
-          {isSubmitting ? 'Saving...' : 'Add Expense'}
+          {isSubmitting ? 'Saving...' : (isEditMode ? 'Update Expense' : 'Add Expense')}
         </Text>
       </TouchableOpacity>
     </ScrollView>

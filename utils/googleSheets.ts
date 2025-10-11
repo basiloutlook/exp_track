@@ -59,7 +59,7 @@ export async function addExpenseToGoogleSheet(
         item: expense.item,
         amount: expense.amount,
         email: expense.email,
-        shop: expense.shopName ?? '',
+        shopName: expense.shopName ?? '',
         paymentMode: expense.paymentMode,
         labels: Array.isArray(expense.labels)
           ? expense.labels.join(', ')
@@ -74,5 +74,41 @@ export async function addExpenseToGoogleSheet(
     console.log('✅ Added to Google Sheets:', result.message);
   } catch (error) {
     console.error('❌ Error adding expense to Google Sheets:', error);
+  }
+}
+
+/**
+ * Update an expense in Google Sheets (via PUT)
+ */
+export async function updateExpenseInGoogleSheet(
+  expense: Expense
+): Promise<void> {
+  try {
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: expense.id,
+        date: expense.date,
+        category: expense.category,
+        subCategory: expense.subCategory ?? '',
+        item: expense.item,
+        amount: expense.amount,
+        email: expense.email,
+        shopName: expense.shopName ?? '',
+        paymentMode: expense.paymentMode,
+        labels: Array.isArray(expense.labels)
+          ? expense.labels.join(', ')
+          : expense.labels || '',
+      }),
+    });
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to update expense');
+    }
+    console.log('✅ Updated in Google Sheets:', result.message);
+  } catch (error) {
+    console.error('❌ Error updating expense in Google Sheets:', error);
   }
 }

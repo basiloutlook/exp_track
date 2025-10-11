@@ -464,8 +464,7 @@ export default function Dashboard() {
   // --- END MODIFICATION 3 ---
   
   const handleEditExpense = (expense: Expense) => {
-      Alert.alert('Edit', `Navigating to edit screen for: ${expense.item}`);
-      // In a real app, this would navigate to an Edit screen
+    navigation.navigate('index', { screen: 'index', params: { expense: JSON.stringify(expense) } });
   };
 
   const handleApplyFilters = (newFilters: any) => {
