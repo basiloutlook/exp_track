@@ -468,7 +468,7 @@ export default function Dashboard() {
 const handleEditExpense = (expense: Expense) => {
   // Navigate to Update Expense page with expense data
   router.push({
-    pathname: '/update-expense', // Navigate directly to the hidden update-expense page
+    pathname: '/update-expense', // Updated pathname to point to the correct route for the initial form
     params: { expense: JSON.stringify(expense) },
   });
 };
@@ -922,7 +922,7 @@ const styles = StyleSheet.create({
   statsGrid: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   section: { backgroundColor: '#ffffff', borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: '#111827', marginBottom: 12 },
-  breakdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  breakdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
   breakdownLabel: { fontSize: 14, color: '#374151' },
   breakdownAmount: { fontSize: 14, fontWeight: '600', color: '#111827' },
   emptyState: { alignItems: 'center', paddingVertical: 40 },

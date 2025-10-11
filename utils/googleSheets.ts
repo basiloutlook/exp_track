@@ -2,6 +2,7 @@ import { Expense } from "@/types/expense";
 
 const GOOGLE_SHEET_URL =
   "https://script.google.com/macros/s/AKfycbzuMYinNGX2OmcMPNXpd9HdBOkOxNveYSt3KtXmnVVuKA4VDuoG-5Vf781HwFNE4x7b/exec";
+  "https://script.google.com/macros/s/AKfycbxp-x5-TqF8GlbbRbaTcllRU_c_IZUKfldizSWPpUFj7d3L0floNzE9t5JnDSc-ncpk/exec";
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.

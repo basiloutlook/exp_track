@@ -233,13 +233,12 @@ export default function AddExpense() {
 
         Alert.alert(
           'Success',
-          'Expense added successfully!',
+          'Expense added successfully',
           [
             {
               text: 'OK',
               onPress: () => {
                 resetForm();
-                setIsSubmitting(false);
                 router.push('/dashboard');
               },
             },
