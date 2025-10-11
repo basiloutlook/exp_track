@@ -39,7 +39,6 @@ export default function AddExpense() {
   const [labels, setLabels] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Store original values for comparison
   const [originalExpense, setOriginalExpense] = useState<Expense | null>(null);
 
   const subCategoryOptions = category ? CATEGORY_MAP[category] || [] : [];
@@ -59,13 +58,13 @@ export default function AddExpense() {
     setOriginalExpense(null);
   };
 
-  // ✅ Load user email
+  // ✅ Load stored user email
   const loadUserEmail = async () => {
     const savedEmail = await storageService.getUserEmail();
     if (savedEmail) setEmail(savedEmail);
   };
 
-  // ✅ Check if current values differ from original
+  // ✅ Check if form data has changed
   const hasChanges = useCallback(() => {
     if (!originalExpense) return false;
 
@@ -86,7 +85,7 @@ export default function AddExpense() {
     );
   }, [email, date, category, subCategory, item, shopName, amount, paymentMode, labels, originalExpense]);
 
-  // ✅ Handle screen focus (Edit / Add)
+  // ✅ Handle screen focus
   useFocusEffect(
     useCallback(() => {
       if (params.expense) {
@@ -105,11 +104,11 @@ export default function AddExpense() {
           setOriginalExpense(expenseToEdit);
         } catch (error) {
           console.error('Error parsing expense:', error);
-          resetForm(); // Reset form on error
+          resetForm();
           loadUserEmail();
         }
       } else {
-        resetForm(); // ✅ Reset form when no expense param
+        resetForm();
         loadUserEmail();
       }
 
@@ -126,7 +125,7 @@ export default function AddExpense() {
     }, [params.expense])
   );
 
-  // ✅ Cancel edit confirmation
+  // ✅ Confirm cancel
   const handleCancel = useCallback(() => {
     Alert.alert('', 'Do you want to keep editing or discard changes?', [
       { text: 'Keep Editing', style: 'cancel' },
@@ -156,21 +155,8 @@ export default function AddExpense() {
       return;
     }
 
-    // Check if editing and no changes made
     if (isEditMode && !hasChanges()) {
-      Alert.alert(
-        'No Changes',
-        'No changes were made to this transaction.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              resetForm();
-              router.replace('/(tabs)/dashboard');
-            },
-          },
-        ]
-      );
+      Alert.alert('No Changes', 'No changes were made to this transaction.');
       return;
     }
 
@@ -179,7 +165,6 @@ export default function AddExpense() {
     try {
       await storageService.saveUserEmail(email);
 
-      // ✅ Fix for local date (no UTC shift)
       const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
         .toISOString()
         .split('T')[0];
@@ -204,22 +189,11 @@ export default function AddExpense() {
           timestamp: originalExpense?.timestamp || new Date().toISOString(),
         };
 
-        await updateExpenseInGoogleSheet(updatedExpense); // Update in Google Sheet
-        await storageService.updateExpenseOnly(updatedExpense); // ✅ Update locally
+        await updateExpenseInGoogleSheet(updatedExpense);
+        await storageService.updateExpenseOnly(updatedExpense);
 
-        Alert.alert(
-          'Success',
-          'Transaction updated successfully!',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                resetForm();
-                router.push('/dashboard');
-              },
-            },
-          ]
-        );
+        Alert.alert('Success', 'Transaction updated successfully!');
+        resetForm(); // ✅ Stay on same screen
       } else {
         // ✅ Add new expense
         const newExpense: Expense = {
@@ -228,26 +202,16 @@ export default function AddExpense() {
           timestamp: new Date().toISOString(),
         };
 
-        await addExpenseToGoogleSheet(newExpense); // Add to Google Sheet
-        await storageService.addExpenseOnly(newExpense); // ✅ Add locally
+        await addExpenseToGoogleSheet(newExpense);
+        await storageService.addExpenseOnly(newExpense);
 
-        Alert.alert(
-          'Success',
-          'Expense added successfully',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                resetForm();
-                router.push('/dashboard');
-              },
-            },
-          ]
-        );
+        Alert.alert('Success', 'Expense added successfully!');
+        resetForm(); // ✅ Stay on same screen
       }
     } catch (error) {
       console.error('❌ Error saving expense:', error);
       Alert.alert('Error', `Failed to ${expenseId ? 'update' : 'save'} expense.`);
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -408,12 +372,13 @@ const styles = StyleSheet.create({
   },
 });
 
-// Define the Google Sheet API URL
-const GOOGLE_SHEET_URL = 'https://script.google.com/macros/s/AKfycby0W_NemJENrAyV_U3W7sqVAozLqXLRyUm_TTn1te4aWGi4ZN8AJz8VuPavfN8KxD4C/exec'; // <-- Replace with your actual URL
+// ✅ Delete Expense function (optional)
+const GOOGLE_SHEET_URL =
+  'https://script.google.com/macros/s/AKfycby0W_NemJENrAyV_U3W7sqVAozLqXLRyUm_TTn1te4aWGi4ZN8AJz8VuPavfN8KxD4C/exec';
 
 export async function deleteExpenseFromGoogleSheetLocal(id: string): Promise<void> {
   try {
-    const payload = { action: 'delete', id }; // Ensure correct payload
+    const payload = { action: 'delete', id };
     console.log('📤 Sending DELETE request to Google Sheet:', payload);
 
     const response = await fetch(GOOGLE_SHEET_URL, {
