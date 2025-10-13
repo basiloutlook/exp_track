@@ -1,0 +1,285 @@
+/*************************************************************
+ * GOOGLE SHEETS EXPENSE TRACKER API (HYBRID VERSION)
+ * ----------------------------------------------------------
+ * ✅ Supports CRUD (add/update/delete)
+ * ✅ Supports raw and summary fetches
+ * ✅ Supports query-based filtering
+ * ✅ Automatically maintains Aggregations sheet
+ *************************************************************/
+
+function doPost(e) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
+    const data = JSON.parse(e.postData.contents);
+    const action = data.action || 'add';
+    const idCol = 11; // Column K for unique ID
+
+    if (action === 'add') {
+      const id = data.id || new Date().getTime().toString();
+      const row = [
+        new Date(), // Timestamp
+        data.date || "",
+        data.category || "",
+        data.subCategory || "",
+        data.item || "",
+        Number(data.amount) || 0,
+        data.email || "",
+        data.shopName || "",
+        data.paymentMode || "",
+        Array.isArray(data.labels) ? data.labels.join(", ") : (data.labels || ""),
+        id
+      ];
+      sheet.appendRow(row);
+      rebuildAggregationsSheet(); // keep summaries fresh
+
+      return jsonResponse({ success: true, message: "Expense added successfully", id });
+    }
+
+    if (action === 'update') {
+      const id = String(data.id || '').trim();
+      if (!id) throw new Error('Missing expense ID for update');
+      const rows = sheet.getDataRange().getValues();
+
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][idCol - 1]) === id) {
+          sheet.getRange(i + 1, 1, 1, 11).setValues([[
+            new Date(),
+            data.date || "",
+            data.category || "",
+            data.subCategory || "",
+            data.item || "",
+            Number(data.amount) || 0,
+            data.email || "",
+            data.shopName || "",
+            data.paymentMode || "",
+            Array.isArray(data.labels) ? data.labels.join(", ") : (data.labels || ""),
+            id
+          ]]);
+          rebuildAggregationsSheet();
+          return jsonResponse({ success: true, message: "Expense updated successfully" });
+        }
+      }
+      return jsonResponse({ success: false, message: "Expense ID not found for update" });
+    }
+
+    if (action === 'delete') {
+      const id = String(data.id || '').trim();
+      if (!id) throw new Error('Missing expense ID for deletion');
+      const rows = sheet.getDataRange().getValues();
+
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][idCol - 1]) === id) {
+          sheet.deleteRow(i + 1);
+          rebuildAggregationsSheet();
+          return jsonResponse({ success: true, message: "Expense deleted successfully" });
+        }
+      }
+      return jsonResponse({ success: false, message: "Expense ID not found for deletion" });
+    }
+
+    return jsonResponse({ success: false, message: "Invalid action" });
+  } catch (error) {
+    return jsonResponse({ success: false, message: error.toString() });
+  }
+}
+
+
+/*************************************************************
+ * READ API (Supports raw + summary + filters)
+ *************************************************************/
+function doGet(e) {
+  try {
+    const mode = (e.parameter.mode || 'raw').toLowerCase();
+
+    if (mode === 'summary') {
+      const summary = readAggregationsSheet();
+      return jsonResponse(summary);
+    }
+
+    // === RAW DATA MODE (default) ===
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1');
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow < 2) return jsonResponse([]); // no data
+
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    let expenses = data.map(r => ({
+      timestamp: r[0],
+      date: r[1],
+      category: r[2],
+      subCategory: r[3],
+      item: r[4],
+      amount: Number(r[5]) || 0,
+      email: r[6],
+      shopName: r[7],
+      paymentMode: r[8],
+      labels: r[9] ? r[9].split(',').map(s => s.trim()) : [],
+      id: r[10] || ""
+    }));
+
+    // === Apply filters if provided ===
+    const params = e.parameter;
+    if (params.startDate || params.endDate) {
+      const start = params.startDate ? new Date(params.startDate) : new Date('2000-01-01');
+      const end = params.endDate ? new Date(params.endDate) : new Date('2100-12-31');
+      expenses = expenses.filter(x => {
+        const d = new Date(x.date);
+        return d >= start && d <= end;
+      });
+    }
+
+    if (params.category) {
+      expenses = expenses.filter(x => x.category === params.category);
+    }
+    if (params.subCategory) {
+      expenses = expenses.filter(x => x.subCategory === params.subCategory);
+    }
+    if (params.label) {
+      const label = params.label.trim().toLowerCase();
+      expenses = expenses.filter(x => x.labels.some(l => l.toLowerCase() === label));
+    }
+
+    return jsonResponse(expenses);
+  } catch (error) {
+    return jsonResponse({ success: false, message: error.toString() });
+  }
+}
+
+
+/*************************************************************
+ * AGGREGATION BUILDER
+ *************************************************************/
+function rebuildAggregationsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const src = ss.getSheetByName('Form Responses 1');
+  const dest = ss.getSheetByName('Aggregations') || ss.insertSheet('Aggregations');
+
+  const lastRow = src.getLastRow();
+  const lastCol = src.getLastColumn();
+  if (lastRow < 2) {
+    dest.clearContents();
+    dest.appendRow(['PeriodType', 'PeriodLabel', 'StartDate', 'EndDate', 'Category', 'SubCategory', 'TotalExpense']);
+    return;
+  }
+
+  const data = src.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const expenses = data.map(r => ({
+    date: parseDate(r[1]),
+    category: r[2],
+    subCategory: r[3],
+    amount: safeNumber(r[5])
+  })).filter(x => !isNaN(x.amount) && x.date);
+
+  const summaries = calculateMonthlyAndQuarterlySummaries(expenses);
+
+  // Write to Aggregations sheet
+  dest.clearContents();
+  dest.appendRow(['PeriodType', 'PeriodLabel', 'StartDate', 'EndDate', 'Category', 'SubCategory', 'TotalExpense']);
+  const rows = summaries.map(s => [s.type, s.label, s.start, s.end, s.category, s.subCategory, s.total]);
+  if (rows.length) dest.getRange(2, 1, rows.length, 7).setValues(rows);
+}
+
+function readAggregationsSheet() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Aggregations');
+  if (!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+  return rows.map(r => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = r[i]);
+    return obj;
+  });
+}
+
+
+/*************************************************************
+ * SUMMARY CALCULATION HELPERS
+ *************************************************************/
+function calculateMonthlyAndQuarterlySummaries(expenses) {
+  const monthlyMap = {};
+  const quarterlyMap = {};
+
+  expenses.forEach(e => {
+    const d = new Date(e.date);
+    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const quarter = Math.floor(d.getMonth() / 3) + 1;
+    const quarterKey = `Q${quarter}-${d.getFullYear()}`;
+
+    const catKey = `${e.category || 'Uncategorized'}|${e.subCategory || ''}`;
+
+    // Month aggregation
+    monthlyMap[monthKey] = monthlyMap[monthKey] || {};
+    monthlyMap[monthKey][catKey] = (monthlyMap[monthKey][catKey] || 0) + e.amount;
+
+    // Quarter aggregation
+    quarterlyMap[quarterKey] = quarterlyMap[quarterKey] || {};
+    quarterlyMap[quarterKey][catKey] = (quarterlyMap[quarterKey][catKey] || 0) + e.amount;
+  });
+
+  const summaries = [];
+
+  // Monthly
+  for (const [monthKey, catMap] of Object.entries(monthlyMap)) {
+    const [y, m] = monthKey.split('-').map(Number);
+    const start = new Date(y, m - 1, 1);
+    const end = new Date(y, m, 0);
+    const label = `${start.toLocaleString('default', { month: 'short' })} ${y}`;
+    let monthTotal = 0;
+    for (const [catKey, total] of Object.entries(catMap)) {
+      const [cat, sub] = catKey.split('|');
+      summaries.push({ type: 'Month', label, start, end, category: cat, subCategory: sub, total });
+      monthTotal += total;
+    }
+    summaries.push({ type: 'Month', label, start, end, category: '', subCategory: '', total: monthTotal });
+  }
+
+  // Quarterly
+  for (const [qKey, catMap] of Object.entries(quarterlyMap)) {
+    const [qLabel, yStr] = qKey.split('-');
+    const y = Number(yStr);
+    const qNum = Number(qLabel.replace('Q', ''));
+    const start = new Date(y, (qNum - 1) * 3, 1);
+    const end = new Date(y, qNum * 3, 0);
+    let qTotal = 0;
+    for (const [catKey, total] of Object.entries(catMap)) {
+      const [cat, sub] = catKey.split('|');
+      summaries.push({ type: 'Quarter', label: `${qLabel} ${y}`, start, end, category: cat, subCategory: sub, total });
+      qTotal += total;
+    }
+    summaries.push({ type: 'Quarter', label: `${qLabel} ${y}`, start, end, category: '', subCategory: '', total: qTotal });
+  }
+
+  return summaries;
+}
+
+
+/*************************************************************
+ * UTILITIES
+ *************************************************************/
+function parseDate(value) {
+  if (!value) return null;
+  try {
+    return new Date(value);
+  } catch {
+    return null;
+  }
+}
+
+function safeNumber(v) {
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+}
+
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/*************************************************************
+ * OPTIONAL TRIGGER
+ *************************************************************/
+function onChange(e) {
+  // Rebuild summaries automatically whenever data changes
+  rebuildAggregationsSheet();
+}

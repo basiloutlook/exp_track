@@ -1,170 +1,94 @@
 import { Expense } from "@/types/expense";
 
-const GOOGLE_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbz6kV2pRDR-3bEEVWAOZZPgmZg-Ju-jJ1iiWPxJd5l72ROLegJ1a7n4u1YbvsUXzmsL/exec";
+const GOOGLE_SHEETS_WEB_APP_URL =
+  "https://script.google.com/macros/s/AKfycbxT16eqozdV3E_sx76yyiRMZ1FCs2xyYzZc2NM4icCdfJO0YuseOKT_tQn8mMeB2vW3/exec";
   
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.
  * Ensures date is treated as a plain local date (not UTC midnight).
  */
-function normalizeRowDate(raw: any): string {
-  const d = raw?.date || raw?.Date || "";
-  if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-    // interpret as local date
-    return d;
-  }
-  return d || "";
+function buildQuery(params: Record<string, any>): string {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      searchParams.append(key, String(value));
+    }
+  });
+  return searchParams.toString();
 }
 
 /**
- * Fetch all expenses from Google Sheet.
+ * Generic GET fetch from Apps Script (supports ?mode=raw, ?mode=summary, filters, etc.)
  */
-export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
+export async function getExpensesFromGoogleSheet(
+  opts: Record<string, any> = {}
+): Promise<any[]> {
   try {
-    const response = await fetch(GOOGLE_SHEET_URL);
-    const data = await response.json();
-
-    if (!Array.isArray(data)) return [];
-
-    return data.map((row: any, index: number) => {
-      const expense = {
-        id: row.id || row.ID || row.Id || `sheet-${index + 1}`,
-        date: normalizeRowDate(row),
-        category: row.category || row.Category || "",
-        subCategory:
-          row.subCategory || row["Sub Category"] || row.subcategory || "",
-        item: row.item || row.Item || "",
-        amount: parseFloat(row.amount || row.Amount || 0) || 0,
-        email: row.email || row["Email Address"] || "",
-        shopName:
-          row.shopName || row.shop || row["Shop/Site/Person name"] || row.Shop || "",
-        paymentMode: row.paymentMode || row["Mode of payment"] || "",
-        labels:
-          typeof row.labels === "string"
-            ? row.labels
-                .split(",")
-                .map((l: string) => l.trim())
-                .filter(Boolean)
-            : Array.isArray(row.labels)
-            ? row.labels
-            : [],
-        timestamp: row.timestamp || row.Timestamp || "",
-      };
-      return expense;
-    });
-  } catch (error) {
-    console.error("❌ Error fetching Google Sheet data:", error);
-    return [];
+    const qs = buildQuery(opts);
+    const url = `${GOOGLE_SHEETS_WEB_APP_URL}?${qs}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error('getExpensesFromGoogleSheet error:', err);
+    throw err;
   }
 }
 
 /**
- * Add a new expense record to Google Sheet.
+ * Add a new expense row to Google Sheet
  */
-export async function addExpenseToGoogleSheet(
-  expense: Expense
-): Promise<void> {
-  try {
-    const payload = {
-      action: "add",
-      id: expense.id,
-      email: expense.email,
-      date: expense.date,
-      category: expense.category,
-      subCategory: expense.subCategory,
-      item: expense.item,
-      shopName: expense.shopName || "",
-      amount: expense.amount,
-      paymentMode: expense.paymentMode,
-      labels: Array.isArray(expense.labels)
-        ? expense.labels.join(", ")
-        : expense.labels || "",
-      timestamp: expense.timestamp,
-    };
-
-    console.log("📤 Sending ADD request to Google Sheet:", payload);
-
-    const response = await fetch(GOOGLE_SHEET_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const result = await response.json();
-    if (!result.success) throw new Error(result.message || "Failed to add");
-    console.log("✅ Added to Google Sheet:", result.message || "");
-  } catch (error) {
-    console.error("❌ Error adding to Google Sheet:", error);
-    throw error;
+export async function addExpenseToGoogleSheet(expense: Expense): Promise<void> {
+  const payload = {
+    action: 'add',
+    ...expense,
+  };
+  const res = await fetch(GOOGLE_SHEETS_WEB_APP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.message || 'Failed to add expense');
   }
 }
 
 /**
- * Update an existing expense record by ID.
+ * Update existing expense by ID
  */
-export async function updateExpenseInGoogleSheet(
-  expense: Expense
-): Promise<void> {
-  try {
-    // Step 1: Delete the existing record
-    await deleteExpenseFromGoogleSheet(expense.id);
-
-    // Step 2: Add the updated record
-    const payload = {
-      action: "add",
-      id: expense.id,
-      email: expense.email,
-      date: expense.date,
-      category: expense.category,
-      subCategory: expense.subCategory,
-      item: expense.item,
-      shopName: expense.shopName || "",
-      amount: expense.amount,
-      paymentMode: expense.paymentMode,
-      labels: Array.isArray(expense.labels)
-        ? expense.labels.join(", ")
-        : expense.labels || "",
-      timestamp: expense.timestamp,
-    };
-
-    console.log("📤 Sending ADD request to Google Sheet after deletion:", payload);
-
-    const response = await fetch(GOOGLE_SHEET_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const result = await response.json();
-    if (!result.success)
-      throw new Error(result.message || "Failed to update expense");
-    console.log("✅ Updated expense in Google Sheet:", result.message || "");
-  } catch (error) {
-    console.error("❌ Error updating expense in Google Sheet:", error);
-    throw error;
+export async function updateExpenseInGoogleSheet(expense: Expense): Promise<void> {
+  const payload = {
+    action: 'update',
+    ...expense,
+  };
+  const res = await fetch(GOOGLE_SHEETS_WEB_APP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.message || 'Failed to update expense');
   }
 }
 
 /**
- * Delete an expense record from Google Sheet by ID.
+ * Delete an expense by ID
  */
 export async function deleteExpenseFromGoogleSheet(id: string): Promise<void> {
-  try {
-    const payload = { action: 'delete', id }; // Ensure correct payload
-    console.log('📤 Sending DELETE request to Google Sheet:', payload);
-
-    const response = await fetch(GOOGLE_SHEET_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const result = await response.json();
-    if (!result.success) throw new Error(result.message || 'Failed to delete expense');
-    console.log('🗑️ Deleted expense from Google Sheet:', id);
-  } catch (error) {
-    console.error('❌ Error deleting expense from Google Sheet:', error);
-    throw error;
+  const payload = {
+    action: 'delete',
+    id,
+  };
+  const res = await fetch(GOOGLE_SHEETS_WEB_APP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.message || 'Failed to delete expense');
   }
 }
