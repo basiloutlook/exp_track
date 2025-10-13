@@ -1,7 +1,7 @@
 import { Expense } from "@/types/expense";
 
 const GOOGLE_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbzuMYinNGX2OmcMPNXpd9HdBOkOxNveYSt3KtXmnVVuKA4VDuoG-5Vf781HwFNE4x7b/exec";
+  "https://script.google.com/macros/s/AKfycbz6kV2pRDR-3bEEVWAOZZPgmZg-Ju-jJ1iiWPxJd5l72ROLegJ1a7n4u1YbvsUXzmsL/exec";
   
 
 /**

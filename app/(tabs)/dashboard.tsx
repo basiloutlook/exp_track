@@ -15,12 +15,45 @@ import { useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
 import { Expense } from '@/types/expense';
 import { Filter, Trash2, TrendingUp, Calendar, X, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Pencil } from 'lucide-react-native';
-// We are defining ExpenseList in this file to match your design
 import StatCard from '@/components/StatCard';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 import DateTimePickerModal from "react-native-modal-datetime-picker";
+import { activateKeepAwake, deactivateKeepAwake } from 'expo-keep-awake';
 
-// --- NEW ExpenseList Component (Improved Logic) ---
+interface Quarter {
+  label: string;
+  startDate: Date;
+  endDate: Date;
+}
+
+// FIXED: Proper quarterly calculation
+const calculateQuarters = (currentDate: Date): Quarter[] => {
+  const currentMonth = currentDate.getMonth();
+  const currentYear = currentDate.getFullYear();
+
+  const quarters: Quarter[] = [];
+
+  // Calculate 4 complete quarters going backwards from current month
+  for (let i = 0; i < 4; i++) {
+    // Calculate the end month (last month before current month - i*3)
+    const endMonthIndex = currentMonth - 1 - (i * 3);
+    
+    // Calculate dates
+    const endDate = new Date(currentYear, endMonthIndex + 1, 0); // Last day of end month
+    const startDate = new Date(currentYear, endMonthIndex - 2, 1); // First day of start month (3 months back)
+
+    const quarterLabel = `${startDate.toLocaleString('default', { month: 'short' })} '${String(startDate.getFullYear()).slice(2)} - ${endDate.toLocaleString('default', { month: 'short' })} '${String(endDate.getFullYear()).slice(2)}`;
+
+    quarters.push({
+      label: quarterLabel,
+      startDate: startDate,
+      endDate: endDate,
+    });
+  }
+
+  return quarters.reverse(); // Show oldest to newest
+};
+
 const ExpenseList = ({ expenses, onEdit, onDelete }: { expenses: Expense[], onEdit: (expense: Expense) => void, onDelete: (id: string) => void }) => {
     return (
         <View>
@@ -32,31 +65,21 @@ const ExpenseList = ({ expenses, onEdit, onDelete }: { expenses: Expense[], onEd
                     year: 'numeric'
                 });
 
-                // Dynamically build the list of details to show
                 const detailsToShow = [];
-
-                // --- MODIFICATION 1: Explicitly include Category (Sub Category) ---
                 const categoryString = expense.category || 'Uncategorized';
                 const subCategoryString = expense.subCategory ? ` (${expense.subCategory})` : '';
                 const fullCategoryDisplay = `${categoryString}${subCategoryString}`;
                 
-                // Pushing the formatted category display as a separate line
                 detailsToShow.push(fullCategoryDisplay);
-
-                // Add the shop name if it exists
                 if (expense.shopName) {
                     detailsToShow.push(expense.shopName);
                 }
-                
-                // Add the date (moved after shopName for better flow or keep it where you want)
                 detailsToShow.push(formattedDate);
-                // --- END MODIFICATION 1 ---
 
                 return (
                     <View key={expense.id} style={styles.expenseItemContainer}>
                         <View style={styles.expenseItemLeft}>
                             <Text style={styles.expenseItemDescription}>{expense.item}</Text>
-                            {/* Map through the details that actually exist for this item */}
                             {detailsToShow.map((detail, index) => (
                                 <Text key={index} style={styles.expenseItemMeta}>{detail}</Text>
                             ))}
@@ -79,12 +102,8 @@ const ExpenseList = ({ expenses, onEdit, onDelete }: { expenses: Expense[], onEd
     );
 };
 
-
-// --- Filter Default Logic ---
-
 const getDefaultStartDate = () => {
     const now = new Date();
-    // Setting to 12 months ago, day 1
     return new Date(now.getFullYear(), now.getMonth() - 12, 1);
 };
 
@@ -98,13 +117,44 @@ const defaultFilters = {
 
 // Define the structure for quarterly data items
 interface QuarterData {
-    label: string;
-    value: number;
-    startDate: Date;
-    endDate: Date;
+  label: string;
+  value: number;
+  startDate: Date;
+  endDate: Date;
+  valueChange: number; // Added valueChange to track increase/decrease
 }
 
-// --- MODIFIED Placeholder Components ---
+// Refactored ComparisonCard to use valueChange instead of comparison
+const ComparisonCard = ({ item, onPress }: { item: QuarterData; onPress?: (item: QuarterData) => void }) => {
+    const hasPriorData = item.valueChange !== 0;
+    const isIncrease = item.valueChange > 0;
+    const percentageChange = hasPriorData ? (item.valueChange / (item.value - item.valueChange)) * 100 : 0;
+
+    const color = hasPriorData
+        ? (isIncrease ? styles.greenText : styles.redText)
+        : styles.grayText;
+    const ArrowIcon = isIncrease ? ArrowUp : ArrowDown;
+    const percentage = Math.abs(percentageChange).toFixed(1);
+
+    return (
+        <TouchableOpacity
+            style={styles.comparisonCard}
+            onPress={() => onPress?.(item)}
+            disabled={!onPress}
+        >
+            <View style={styles.comparisonCardHeader}>
+                <Text style={styles.comparisonLabel}>{item.label}</Text>
+                {hasPriorData && (
+                    <View style={styles.comparisonBadge}>
+                        <ArrowIcon size={10} color={color.color} />
+                        <Text style={[styles.comparisonText, color]}>{percentage}%</Text>
+                    </View>
+                )}
+            </View>
+            <Text style={styles.comparisonValue}>{`₹${item.value.toFixed(2)}`}</Text>
+        </TouchableOpacity>
+    );
+};
 
 const BarChart = ({ title, data, onItemPress, detailText = '', detailPosition = 'right' }: {
     title: string;
@@ -113,28 +163,16 @@ const BarChart = ({ title, data, onItemPress, detailText = '', detailPosition = 
     detailText?: string;
     detailPosition?: 'left' | 'right';
 }) => {
-  // Defensive: ensure data is an array and don't mutate the incoming array
-  const items = Array.isArray(data) ? data.slice().map(d => ({
-    label: String((d as any).label ?? ''),
-    value: Number((d as any).value ?? 0),
-    startDate: (d as any).startDate instanceof Date ? d.startDate : new Date(),
-    endDate: (d as any).endDate instanceof Date ? d.endDate : new Date(),
-  })) : [];
+  const items = Array.isArray(data) ? data.slice() : [];
 
   return (
     <View style={styles.chartContainer}>
       <Text style={styles.sectionTitle}>{String(title)}</Text>
-      {items.map(item => (
-        <TouchableOpacity
-          key={String(item.label)}
-          style={styles.barChartItem}
-          onPress={() => onItemPress?.(item)}
-          disabled={!onItemPress}
-        >
-          <Text style={styles.breakdownLabel}>{String(item.label)}</Text>
-          <Text style={styles.breakdownAmount}>{`₹${Number(item.value).toFixed(2)}`}</Text>
-        </TouchableOpacity>
-      ))}
+      <View style={styles.comparisonGrid}>
+        {items.map(item => (
+          <ComparisonCard key={String(item.label)} item={item} onPress={onItemPress} />
+        ))}
+      </View>
       {detailText ? (
         <View style={[styles.detailContainer, detailPosition === 'right' ? styles.detailRight : styles.detailLeft]}>
             <Text style={styles.detailText}>{detailText}</Text>
@@ -144,7 +182,6 @@ const BarChart = ({ title, data, onItemPress, detailText = '', detailPosition = 
   );
 };
 
-// MODIFIED PieChart Component to handle viewing limits and More/Collapse buttons
 const PieChart = ({ title, data, onSlicePress, noContainerStyle = false, showCount, onShowMore, onCollapse, detailText = '', detailPosition = 'right' }: {
     title: string;
     data: { name: string; value: number }[] | any;
@@ -164,13 +201,10 @@ const PieChart = ({ title, data, onSlicePress, noContainerStyle = false, showCou
     : [];
 
   const sorted = items.sort((a, b) => (Number(b.value) || 0) - (Number(a.value) || 0));
-
-  // Apply limit if showCount is provided
   const visibleItems = showCount !== undefined ? sorted.slice(0, showCount) : sorted;
   const totalItems = sorted.length;
   const canShowMore = showCount !== undefined && totalItems > showCount;
   const canCollapse = showCount !== undefined && showCount > 5;
-
 
   return (
     <View style={noContainerStyle ? {} : styles.chartContainer}>
@@ -186,7 +220,6 @@ const PieChart = ({ title, data, onSlicePress, noContainerStyle = false, showCou
         </TouchableOpacity>
       )) : <Text style={styles.emptyText}>No data for this period</Text>}
 
-      {/* Show More/Collapse Buttons */}
       {showCount !== undefined && (canShowMore || canCollapse) && (
           <View style={styles.paginationControls}>
               {canCollapse && (
@@ -213,9 +246,7 @@ const PieChart = ({ title, data, onSlicePress, noContainerStyle = false, showCou
   );
 };
 
-// --- FilterSidebar Component (Unchanged) ---
 const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: any) => {
-
       const makeInitial = (): any => {
         const src = initialFilters || defaultFilters;
         return {
@@ -295,7 +326,6 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
       const currentSubCategory = localFilters.subCategory;
       const currentLabels = localFilters.labels;
 
-
       return (
         <Modal visible={visible} transparent={true} animationType="slide" onRequestClose={onClose}>
           <Pressable style={styles.modalBackdrop} onPress={onClose} />
@@ -365,7 +395,6 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
       );
 };
 
-// --- Helper Component for MA Card (Unchanged) ---
 const MovingAverageCard = ({ title, maValue, comparison }: {
     title: string;
     maValue: number;
@@ -376,10 +405,8 @@ const MovingAverageCard = ({ title, maValue, comparison }: {
     }
 }) => {
     const { percentageChange, isIncrease, hasPriorData } = comparison;
-
-    // Determine color and icon based on change direction
     const color = hasPriorData
-        ? (isIncrease ? styles.redText : styles.greenText) // Expenses increase (bad) -> Red, decrease (good) -> Green
+        ? (isIncrease ? styles.redText : styles.greenText)
         : styles.grayText;
     const ArrowIcon = isIncrease ? ArrowUp : ArrowDown;
     const percentage = Math.abs(percentageChange).toFixed(1);
@@ -398,10 +425,10 @@ const MovingAverageCard = ({ title, maValue, comparison }: {
     );
 };
 
-
-// --- Main Dashboard Component ---
-
 const ITEMS_PER_LOAD = 5;
+
+type SortBy = 'date' | 'amount';
+type SortOrder = 'asc' | 'desc';
 
 export default function Dashboard() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -409,13 +436,13 @@ export default function Dashboard() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState<any>({ ...defaultFilters });
   const [selectedCategoryForDrill, setSelectedCategoryForDrill] = useState<string | null>(null);
-  // NEW STATE: For managing how many categories are visible
+  const [selectedSubCategoryForDrill, setSelectedSubCategoryForDrill] = useState<string | null>(null);
   const [categoryShowCount, setCategoryShowCount] = useState(ITEMS_PER_LOAD);
   const [transactionShowCount, setTransactionShowCount] = useState(ITEMS_PER_LOAD);
-
-  // This drill-down state is set by clicking a BarChart item
+  const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [drillDownDateFilter, setDrillDownDateFilter] = useState<{ startDate: Date, endDate: Date } | null>(null);
-
+  const [sortBy, setSortBy] = useState<SortBy>('date');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const router = useRouter();
 
   const loadExpenses = useCallback(async () => {
@@ -439,45 +466,48 @@ export default function Dashboard() {
     }, [loadExpenses])
   );
 
-  const handleDeleteExpense = async (id: string) => {
-  Alert.alert(
-    'Delete Expense',
-    'Are you sure you want to delete this expense? This action cannot be undone.',
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            console.log(`🗑️ Starting delete for ID: ${id}`);
-            await deleteExpenseFromGoogleSheet(id); // Delete from Google Sheet
-            await storageService.deleteExpense(id); // Delete locally
-            await loadExpenses(); // ✅ Refresh the list
-            Alert.alert('Success', 'Expense deleted successfully!');
-          } catch (error) {
-            console.error('❌ Error deleting expense:', error);
-            Alert.alert('Error', 'Failed to delete expense. Please try again.');
-          }
-        },
-      },
-    ]
-  );
-};
+  useEffect(() => {
+    const currentDate = new Date();
+    setQuarters(calculateQuarters(currentDate));
+  }, []);
 
-const handleEditExpense = (expense: Expense) => {
-  // Navigate to Update Expense page with expense data
-  router.push({
-    pathname: '/update-expense', // Updated pathname to point to the correct route for the initial form
-    params: { expense: JSON.stringify(expense) },
-  });
-};
+  const handleDeleteExpense = async (id: string) => {
+    Alert.alert(
+      'Delete Expense',
+      'Are you sure you want to delete this expense? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteExpenseFromGoogleSheet(id);
+              await storageService.deleteExpense(id);
+              await loadExpenses();
+              Alert.alert('Success', 'Expense deleted successfully!');
+            } catch (error) {
+              console.error('Error deleting expense:', error);
+              Alert.alert('Error', 'Failed to delete expense. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleEditExpense = (expense: Expense) => {
+    router.push({
+      pathname: '/update-expense',
+      params: { expense: JSON.stringify(expense) },
+    });
+  };
 
   const handleApplyFilters = (newFilters: any) => {
-    // Reset drill-down when main filters are applied
     setDrillDownDateFilter(null);
-    setSelectedCategoryForDrill(null); // Also reset category drill-down
-    setCategoryShowCount(ITEMS_PER_LOAD); // Reset category view count
+    setSelectedCategoryForDrill(null);
+    setSelectedSubCategoryForDrill(null);
+    setCategoryShowCount(ITEMS_PER_LOAD);
     setFilters({
       ...newFilters,
       startDate: newFilters.startDate ? new Date(newFilters.startDate) : new Date(defaultFilters.startDate),
@@ -490,16 +520,34 @@ const handleEditExpense = (expense: Expense) => {
   const handleClearDrillDown = () => {
     setDrillDownDateFilter(null);
     setSelectedCategoryForDrill(null);
+    setSelectedSubCategoryForDrill(null);
   };
 
   const handleQuarterlyDrillDown = (item: QuarterData) => {
-    // Setting the drill-down filter based on the quarter clicked
     setDrillDownDateFilter({
         startDate: item.startDate,
-        // Set end time to the very end of the day for the filter to include all expenses on that date
         endDate: new Date(item.endDate.getFullYear(), item.endDate.getMonth(), item.endDate.getDate(), 23, 59, 59, 999)
     });
-    setSelectedCategoryForDrill(null); // Reset category drill-down on date drill-down
+    setSelectedCategoryForDrill(null);
+    setSelectedSubCategoryForDrill(null);
+  };
+
+  const handleMonthDrillDown = (item: QuarterData) => {
+    setDrillDownDateFilter({
+        startDate: item.startDate,
+        endDate: new Date(item.endDate.getFullYear(), item.endDate.getMonth(), item.endDate.getDate(), 23, 59, 59, 999)
+    });
+    setSelectedCategoryForDrill(null);
+    setSelectedSubCategoryForDrill(null);
+  };
+
+  const handleCategoryDrillDown = (category: string) => {
+    setSelectedCategoryForDrill(category);
+    setSelectedSubCategoryForDrill(null);
+  };
+
+  const handleSubCategoryDrillDown = (subCategory: string) => {
+    setSelectedSubCategoryForDrill(subCategory);
   };
 
   const handleShowMoreCategories = useCallback(() => {
@@ -518,9 +566,13 @@ const handleEditExpense = (expense: Expense) => {
     setTransactionShowCount(prev => Math.max(ITEMS_PER_LOAD, prev - ITEMS_PER_LOAD));
   }, []);
 
-
-  // --- Filtered Expenses Logic ---
-  const { filteredExpenses, mainFilteredExpenses, filterOptions } = useMemo(() => {
+  // NEW: Comprehensive filtering logic
+  const { 
+    allExpenses, 
+    currentMonthExpenses, 
+    filteredExpensesForDisplay,
+    filterOptions 
+  } = useMemo(() => {
     const categories = new Set<string>();
     const subCategories = new Set<string>();
     const labels = new Set<string>();
@@ -530,60 +582,72 @@ const handleEditExpense = (expense: Expense) => {
       e.labels?.forEach(l => labels.add(l));
     });
 
-    // 1. Main Filtered Expenses: Respects ONLY sidebar filters (date and category/label).
-    const applyMainFilters = (expense: Expense) => {
-        const expenseDate = new Date(expense.date);
+    const now = new Date();
 
-        // Date Range Filter Logic (using main filters dates)
+    // Current month expenses (NEVER FILTERED)
+    const currentMonth = expenses.filter(e => {
+        const d = new Date(e.date);
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+
+    // Apply sidebar date filter
+    const dateFiltered = expenses.filter(e => {
+        const expenseDate = new Date(e.date);
         const startDate = new Date(filters.startDate);
         startDate.setHours(0, 0, 0, 0);
         const endDate = new Date(filters.endDate);
         endDate.setHours(23, 59, 59, 999);
-
-        if(expenseDate < startDate || expenseDate > endDate) return false;
-
-        // Category/Label Filters
-        if (filters.category && expense.category !== filters.category) return false;
-        if (filters.subCategory && expense.subCategory !== filters.subCategory) return false;
-        if (filters.labels.length > 0 && !filters.labels.every((l: string) => (expense.labels || []).includes(l))) return false;
-
-        return true;
-    };
-
-    const mainFiltered = expenses.filter(applyMainFilters);
-
-    // 2. Drill-Down Filtered Expenses: Respects sidebar filters AND drill-down date.
-    const drillDownStartDate = drillDownDateFilter?.startDate || filters.startDate;
-    const drillDownEndDate = drillDownDateFilter?.endDate || filters.endDate;
-
-    const finalFiltered = mainFiltered.filter(e => {
-        const expenseDate = new Date(e.date);
-
-        const startDate = new Date(drillDownStartDate);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(drillDownEndDate);
-        endDate.setHours(23, 59, 59, 999);
-
         return expenseDate >= startDate && expenseDate <= endDate;
     });
 
+    // Apply sidebar category/label filters
+    const sidebarFiltered = dateFiltered.filter(e => {
+        if (filters.category && e.category !== filters.category) return false;
+        if (filters.subCategory && e.subCategory !== filters.subCategory) return false;
+        if (filters.labels.length > 0 && !filters.labels.every((l: string) => (e.labels || []).includes(l))) return false;
+        return true;
+    });
+
+    // Apply drill-down filters
+    let displayExpenses = sidebarFiltered;
+
+    // Date drill-down
+    if (drillDownDateFilter) {
+        displayExpenses = displayExpenses.filter(e => {
+            const expenseDate = new Date(e.date);
+            const startDate = new Date(drillDownDateFilter.startDate);
+            startDate.setHours(0, 0, 0, 0);
+            const endDate = new Date(drillDownDateFilter.endDate);
+            endDate.setHours(23, 59, 59, 999);
+            return expenseDate >= startDate && expenseDate <= endDate;
+        });
+    }
+
+    // Category drill-down
+    if (selectedCategoryForDrill) {
+        displayExpenses = displayExpenses.filter(e => e.category === selectedCategoryForDrill);
+    }
+
+    // Sub-category drill-down
+    if (selectedSubCategoryForDrill) {
+        displayExpenses = displayExpenses.filter(e => e.subCategory === selectedSubCategoryForDrill);
+    }
 
     return {
-        // This is the list for the stats, pie charts, and expense list
-        filteredExpenses: finalFiltered,
-        // This is the list for Quarterly, Past 3 Months, and MA (respects main filters, ignores drill-down)
-        mainFilteredExpenses: mainFiltered,
+        allExpenses: expenses,
+        currentMonthExpenses: currentMonth,
+        filteredExpensesForDisplay: displayExpenses,
         filterOptions: {
             categories: Array.from(categories).sort(),
             subCategories: Array.from(subCategories).sort(),
             labels: Array.from(labels).sort(),
         }
     };
-  }, [expenses, filters, drillDownDateFilter]);
+  }, [expenses, filters, drillDownDateFilter, selectedCategoryForDrill, selectedSubCategoryForDrill]);
 
-  // --- Chart and Stats Calculations ---
+  // Chart calculations
   const {
-    pastYearTotal,
+    totalExpense,
     currentMonthTotal,
     quarterlyData,
     past3MonthsData,
@@ -591,33 +655,36 @@ const handleEditExpense = (expense: Expense) => {
     const now = new Date();
     const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-    // Quarterly data (uses mainFilteredExpenses)
-    const quarterlyData: QuarterData[] = [];
-    for (let i = 0; i < 4; i++) {
-        const endMonthIndex = now.getMonth() + 1 - (i * 3);
-        const qEndDate = new Date(now.getFullYear(), endMonthIndex, 0);
-        const qStartDate = new Date(now.getFullYear(), endMonthIndex - 3, 1);
+    // Quarterly data with comparisons
+    const quarters = calculateQuarters(now);
+    const quarterlyData: QuarterData[] = quarters.map((q, index) => {
+      const value = allExpenses
+        .filter(e => {
+          const d = new Date(e.date);
+          return d >= q.startDate && d <= q.endDate;
+        })
+        .reduce((sum, e) => sum + e.amount, 0);
 
-        const quarterLabel = `${qStartDate.toLocaleString('default', { month: 'short' })} '${String(qStartDate.getFullYear()).slice(2)} - ${qEndDate.toLocaleString('default', { month: 'short' })} '${String(qEndDate.getFullYear()).slice(2)}`;
-
-        const value = mainFilteredExpenses
+      const previousQuarterValue = index < quarters.length - 1
+        ? allExpenses
             .filter(e => {
-                const d = new Date(e.date);
-                return d >= qStartDate && d <= qEndDate;
+              const d = new Date(e.date);
+              return d >= quarters[index + 1].startDate && d <= quarters[index + 1].endDate;
             })
-            .reduce((sum, e) => sum + e.amount, 0);
+            .reduce((sum, e) => sum + e.amount, 0)
+        : 0;
 
-        quarterlyData.push({
-             label: quarterLabel,
-             value: value,
-             startDate: qStartDate,
-             endDate: qEndDate,
-        });
-    }
+      return {
+        label: q.label,
+        value: value,
+        startDate: q.startDate,
+        endDate: q.endDate,
+        valueChange: value - previousQuarterValue,
+      };
+    });
     quarterlyData.reverse();
 
-
-    // Past 3 months data (uses mainFilteredExpenses)
+    // Past 3 months data with comparisons
     const past3MonthsData: QuarterData[] = [3, 2, 1].reverse().map(i => {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = monthKey(d);
@@ -625,34 +692,53 @@ const handleEditExpense = (expense: Expense) => {
       const start = new Date(d.getFullYear(), d.getMonth(), 1);
       const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
+      const value = allExpenses
+        .filter(e => monthKey(new Date(e.date)) === key)
+        .reduce((s, e) => s + e.amount, 0);
+
+      const previousMonthValue = allExpenses
+        .filter(e => {
+          const prevMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+          return monthKey(new Date(e.date)) === monthKey(prevMonth);
+        })
+        .reduce((s, e) => s + e.amount, 0);
+
       return {
         label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
-        value: mainFilteredExpenses.filter(e => monthKey(new Date(e.date)) === key).reduce((s, e) => s + e.amount, 0),
+        value: value,
         startDate: start,
         endDate: end,
+        valueChange: value - previousMonthValue,
       };
     });
 
-    // Stats (use filteredExpenses, which respects both main AND drill-down)
-    const pastYearTotal = filteredExpenses.reduce((s, e) => s + e.amount, 0);
-
-    const currentMonthExpenses = filteredExpenses.filter(e => {
-        const d = new Date(e.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    });
-
+    const totalExpense = filteredExpensesForDisplay.reduce((s, e) => s + e.amount, 0);
+    const currentMonthTotal = currentMonthExpenses.reduce((s, e) => s + e.amount, 0);
 
     return {
-      pastYearTotal: pastYearTotal,
-      currentMonthTotal: currentMonthExpenses.reduce((s, e) => s + e.amount, 0),
+      totalExpense,
+      currentMonthTotal,
       quarterlyData,
       past3MonthsData,
     };
-  }, [filteredExpenses, mainFilteredExpenses]);
-
+  }, [allExpenses, currentMonthExpenses, filteredExpensesForDisplay]);
 
   const movingAverages = useMemo(() => {
-    const expensesToAverage = mainFilteredExpenses;
+    // Moving averages use filtered expenses (respects sidebar filters, not drill-downs)
+    const expensesToAverage = expenses.filter(e => {
+        const expenseDate = new Date(e.date);
+        const startDate = new Date(filters.startDate);
+        startDate.setHours(0, 0, 0, 0);
+        const endDate = new Date(filters.endDate);
+        endDate.setHours(23, 59, 59, 999);
+        
+        if (expenseDate < startDate || expenseDate > endDate) return false;
+        if (filters.category && e.category !== filters.category) return false;
+        if (filters.subCategory && e.subCategory !== filters.subCategory) return false;
+        if (filters.labels.length > 0 && !filters.labels.every((l: string) => (e.labels || []).includes(l))) return false;
+        return true;
+    });
+
     const now = new Date();
     const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
@@ -663,7 +749,6 @@ const handleEditExpense = (expense: Expense) => {
     });
 
     const calculateMAData = (months: number) => {
-        // 1. Current Period: Months -1 to -N
         const currentPeriodValues = Array.from({ length: months }, (_, i) => {
             const d = new Date(now.getFullYear(), now.getMonth() - (i + 1), 1);
             return monthlyMap[monthKey(d)] || 0;
@@ -671,14 +756,12 @@ const handleEditExpense = (expense: Expense) => {
         const currentPeriodTotal = currentPeriodValues.reduce((s, v) => s + v, 0);
         const maValue = currentPeriodTotal / months;
 
-        // 2. Prior Period: Months -(N+1) to -2N
         const priorPeriodValues = Array.from({ length: months }, (_, i) => {
             const d = new Date(now.getFullYear(), now.getMonth() - (i + 1 + months), 1);
             return monthlyMap[monthKey(d)] || 0;
         });
         const priorPeriodTotal = priorPeriodValues.reduce((s, v) => s + v, 0);
 
-        // 3. Comparison
         let percentageChange = 0;
         let isIncrease = false;
         let hasPriorData = false;
@@ -709,18 +792,18 @@ const handleEditExpense = (expense: Expense) => {
         ma12: calculateMAData(12),
         ma36: calculateMAData(36),
     };
-  }, [mainFilteredExpenses]);
+  }, [expenses, filters]);
 
   const { categoryPieData, subCategoryPieData } = useMemo(() => {
     const categoryTotals: { [k: string]: { value: number, name: string } } = {};
-    filteredExpenses.forEach(e => {
+    filteredExpensesForDisplay.forEach(e => {
       if (!categoryTotals[e.category]) categoryTotals[e.category] = { value: 0, name: e.category };
       categoryTotals[e.category].value += Number(e.amount) || 0;
     });
 
     const subCategoryTotals: { [k: string]: { value: number, name: string } } = {};
     if (selectedCategoryForDrill) {
-      filteredExpenses.forEach(e => {
+      filteredExpensesForDisplay.forEach(e => {
         if (e.category === selectedCategoryForDrill) {
           const key = e.subCategory || 'Uncategorized';
           if (!subCategoryTotals[key]) subCategoryTotals[key] = { value: 0, name: key };
@@ -732,10 +815,26 @@ const handleEditExpense = (expense: Expense) => {
       categoryPieData: Object.values(categoryTotals),
       subCategoryPieData: Object.values(subCategoryTotals),
     };
-}, [filteredExpenses, selectedCategoryForDrill]);
+  }, [filteredExpensesForDisplay, selectedCategoryForDrill]);
 
+  const sortedTransactions = useMemo(() => {
+    const sorted = [...filteredExpensesForDisplay];
+    
+    if (sortBy === 'date') {
+      sorted.sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      });
+    } else if (sortBy === 'amount') {
+      sorted.sort((a, b) => {
+        return sortOrder === 'asc' ? a.amount - b.amount : b.amount - a.amount;
+      });
+    }
+    
+    return sorted;
+  }, [filteredExpensesForDisplay, sortBy, sortOrder]);
 
-  // --- Helper to generate the main filter detail text ---
   const getMainFilterDetail = () => {
     let detail = '';
     if (filters.category) {
@@ -745,7 +844,6 @@ const handleEditExpense = (expense: Expense) => {
         }
         detail += ' | ';
     } else if (filters.subCategory) {
-         // Should not happen if category is null, but for completeness
          detail += `Sub-Category: ${filters.subCategory} | `;
     }
 
@@ -755,13 +853,30 @@ const handleEditExpense = (expense: Expense) => {
 
     const startDateStr = filters.startDate.toLocaleDateString();
     const endDateStr = filters.endDate.toLocaleDateString();
-
-    // Always include the date range
     detail += `Date: ${startDateStr} - ${endDateStr}`;
 
     return detail.trim();
-  }
+  };
 
+  const getActiveDrillDownText = () => {
+    const parts = [];
+    
+    if (drillDownDateFilter) {
+        parts.push(`Date: ${new Date(drillDownDateFilter.startDate).toLocaleDateString()} to ${new Date(drillDownDateFilter.endDate).toLocaleDateString()}`);
+    }
+    
+    if (selectedCategoryForDrill) {
+        parts.push(`Category: ${selectedCategoryForDrill}`);
+    }
+    
+    if (selectedSubCategoryForDrill) {
+        parts.push(`Sub-Category: ${selectedSubCategoryForDrill}`);
+    }
+    
+    return parts.length > 0 ? parts.join(' | ') : '';
+  };
+
+  const hasActiveDrillDown = drillDownDateFilter || selectedCategoryForDrill || selectedSubCategoryForDrill;
 
   return (
     <>
@@ -784,13 +899,11 @@ const handleEditExpense = (expense: Expense) => {
           </TouchableOpacity>
         </View>
 
-        {/* Drill-Down Filter Indicator (Keeping this separate for global visibility) */}
-        {drillDownDateFilter && (
+        {hasActiveDrillDown && (
             <View style={styles.drillDownIndicator}>
                 <Text style={styles.drillDownText}>
-                    <Text style={{fontWeight: 'bold'}}>Drill-Down Filter Active:</Text>
-                    {' '}
-                    {new Date(drillDownDateFilter.startDate).toLocaleDateString()} to {new Date(drillDownDateFilter.endDate).toLocaleDateString()}
+                    <Text style={{fontWeight: 'bold'}}>Active Drill-Down:</Text>
+                    {' '}{getActiveDrillDownText()}
                 </Text>
                 <TouchableOpacity onPress={handleClearDrillDown} style={styles.clearDrillDownButton}>
                     <X size={16} color="#ffffff" />
@@ -806,59 +919,116 @@ const handleEditExpense = (expense: Expense) => {
             ) : (
                 <>
                 <View style={styles.statsGrid}>
-                    <StatCard icon={<TrendingUp size={24} color="#2563eb" />} title="Filtered Total" value={`₹${pastYearTotal.toFixed(2)}`} subtitle="Total spent in current view" />
-                    <StatCard icon={<Calendar size={24} color="#10b981" />} title="Current Month" value={`₹${currentMonthTotal.toFixed(2)}`} subtitle="Total spent this month (filtered)" />
+                    <StatCard 
+                        icon={<TrendingUp size={24} color="#2563eb" />} 
+                        title="Total Expense" 
+                        value={`₹${totalExpense.toFixed(2)}`} 
+                        subtitle=""
+                    />
+                    <StatCard 
+                        icon={<Calendar size={24} color="#10b981" />} 
+                        title="Current Month" 
+                        value={`₹${currentMonthTotal.toFixed(2)}`} 
+                        subtitle=""
+                    />
                 </View>
 
-                {/* Quarterly Chart: Title and Details Updated */}
-                <BarChart
-                    title="Quarterly Expenses (Past Year)"
-                    data={quarterlyData}
-                    onItemPress={handleQuarterlyDrillDown}
-                    detailText="Click to Drill"
-                    detailPosition='left'
-                />
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Quarterly Expenses (Past Year)</Text>
+                    <View style={styles.expensesList}>
+                      {quarterlyData.map((quarter, index) => {
+                        const percentageChange = quarter.valueChange !== 0
+                          ? (quarter.valueChange / (quarter.value - quarter.valueChange)) * 100
+                          : 0;
 
-                {/* Past 3 Months Chart: Title Updated, No Detail Text */}
-                <BarChart
-                    title="Past 3 Months Expenses"
-                    data={past3MonthsData}
-                    detailText="" // Explicitly remove
-                />
+                        return (
+                          <View key={index} style={styles.expenseRow}>
+                            <Text style={styles.expenseLabel}>{quarter.label}</Text>
+                            <View style={styles.expenseValueContainer}>
+                              <Text style={styles.expenseValue}>{`₹${quarter.value.toFixed(2)}`}</Text>
+                              {quarter.valueChange > 0 ? (
+                                <View style={styles.indicatorContainer}>
+                                  <ArrowUp size={12} color="green" />
+                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                </View>
+                              ) : (
+                                <View style={styles.indicatorContainer}>
+                                  <ArrowDown size={12} color="red" />
+                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                </View>
+
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Past 3 Months Expenses</Text>
+                    <View style={styles.expensesList}>
+                      {past3MonthsData.map((month, index) => {
+                        const percentageChange = month.valueChange !== 0
+                          ? (month.valueChange / (month.value - month.valueChange)) * 100
+                          : 0;
+
+                        return (
+                          <View key={index} style={styles.expenseRow}>
+                            <Text style={styles.expenseLabel}>{month.label}</Text>
+                            <View style={styles.expenseValueContainer}>
+                              <Text style={styles.expenseValue}>{`₹${month.value.toFixed(2)}`}</Text>
+                              {month.valueChange > 0 ? (
+                                <View style={styles.indicatorContainer}>
+                                  <ArrowUp size={12} color="green" />
+                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                </View>
+                              ) : (
+                                <View style={styles.indicatorContainer}>
+                                  <ArrowDown size={12} color="red" />
+                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                </View>
 
                 <View style={styles.section}>
                     {selectedCategoryForDrill ? (
                         <>
-                            <TouchableOpacity onPress={() => setSelectedCategoryForDrill(null)} style={styles.drilldownHeader}>
-                                <Text style={styles.backButton}>← Back</Text>
+                            <TouchableOpacity onPress={() => {
+                                setSelectedCategoryForDrill(null);
+                                setSelectedSubCategoryForDrill(null);
+                            }} style={styles.drilldownHeader}>
+                                <Text style={styles.backButton}>← Back to Categories</Text>
                             </TouchableOpacity>
                            <PieChart
                                 title={`Sub-categories of ${selectedCategoryForDrill}`}
                                 data={subCategoryPieData}
+                                onSlicePress={handleSubCategoryDrillDown}
                                 noContainerStyle={true}
-                                detailText={`Filtered by: ${getMainFilterDetail()}`}
-                                detailPosition='right'
+                                detailText="Click to drill down by sub-category"
+                                detailPosition='left'
                             />
                         </>
                     ) : (
-                        (
-                            <PieChart
-                                title="Category Breakdown"
-                                data={categoryPieData}
-                                onSlicePress={(name) => setSelectedCategoryForDrill(name)}
-                                noContainerStyle={true}
-                                showCount={categoryShowCount}
-                                onShowMore={handleShowMoreCategories}
-                                onCollapse={handleCollapseCategories}
-                                detailText={`Filtered by: ${getMainFilterDetail()}`}
-                                detailPosition='right'
-                            />
-                        )
+                        <PieChart
+                            title="Category Breakdown"
+                            data={categoryPieData}
+                            onSlicePress={handleCategoryDrillDown}
+                            noContainerStyle={true}
+                            showCount={categoryShowCount}
+                            onShowMore={handleShowMoreCategories}
+                            onCollapse={handleCollapseCategories}
+                            detailText="Click to drill down by category"
+                            detailPosition='left'
+                        />
                     )}
                 </View>
 
                 <View style={styles.section}>
-                    {/* Moving Averages: Title Updated, Detail moved to bottom left */}
                     <Text style={styles.sectionTitle}>Moving Averages</Text>
                     <View style={styles.maGrid}>
                         <MovingAverageCard title="3-Month" maValue={movingAverages.ma3.maValue} comparison={movingAverages.ma3.comparison} />
@@ -867,21 +1037,55 @@ const handleEditExpense = (expense: Expense) => {
                         <MovingAverageCard title="3-Year" maValue={movingAverages.ma36.maValue} comparison={movingAverages.ma36.comparison} />
                     </View>
                     <View style={[styles.detailContainer, styles.detailLeft, { marginTop: 12, borderTopWidth: 0, paddingBottom: 0, paddingTop: 0 }]}>
-                        <Text style={styles.detailText}>Filtered by sidebar</Text>
+                        <Text style={styles.detailText}>Filtered by: {getMainFilterDetail()}</Text>
                     </View>
                 </View>
 
                 <View style={styles.section}>
-                    {/* --- MODIFICATION 2: Change section title --- */}
-                    <Text style={styles.sectionTitle}>Recent Transactions</Text>
-                    {/* Expense List: Uses filteredExpenses */}
+                    <View style={styles.transactionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Transactions</Text>
+                        <View style={styles.sortControls}>
+                            <TouchableOpacity 
+                                style={[styles.sortButton, sortBy === 'date' && styles.sortButtonActive]}
+                                onPress={() => {
+                                    if (sortBy === 'date') {
+                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                                    } else {
+                                        setSortBy('date');
+                                        setSortOrder('desc');
+                                    }
+                                }}
+                            >
+                                <Calendar size={14} color={sortBy === 'date' ? '#2563eb' : '#6b7280'} />
+                                <Text style={[styles.sortButtonText, sortBy === 'date' && styles.sortButtonTextActive]}>
+                                    Date {sortBy === 'date' && (sortOrder === 'asc' ? '(A-Z)' : '(Z-A)')}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.sortButton, sortBy === 'amount' && styles.sortButtonActive]}
+                                onPress={() => {
+                                    if (sortBy === 'amount') {
+                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                                    } else {
+                                        setSortBy('amount');
+                                        setSortOrder('desc');
+                                    }
+                                }}
+                            >
+                                <TrendingUp size={14} color={sortBy === 'amount' ? '#2563eb' : '#6b7280'} />
+                                <Text style={[styles.sortButtonText, sortBy === 'amount' && styles.sortButtonTextActive]}>
+                                    Amount {sortBy === 'amount' && (sortOrder === 'asc' ? '(A-Z)' : '(Z-A)')}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
                     <ExpenseList
-                        expenses={filteredExpenses.slice(0, transactionShowCount)}
+                        expenses={sortedTransactions.slice(0, transactionShowCount)}
                         onDelete={handleDeleteExpense}
                         onEdit={handleEditExpense}
                     />
 
-                    {filteredExpenses.length > ITEMS_PER_LOAD && (
+                    {filteredExpensesForDisplay.length > ITEMS_PER_LOAD && (
                       <View style={styles.paginationControls}>
                         {transactionShowCount > ITEMS_PER_LOAD && (
                           <TouchableOpacity style={styles.collapseButton} onPress={handleCollapseTransactions}>
@@ -889,18 +1093,14 @@ const handleEditExpense = (expense: Expense) => {
                             <ChevronUp size={16} color="#2563eb" />
                           </TouchableOpacity>
                         )}
-                        {filteredExpenses.length > transactionShowCount && (
+                        {filteredExpensesForDisplay.length > transactionShowCount && (
                            <TouchableOpacity style={styles.moreButton} onPress={handleShowMoreTransactions}>
-                            <Text style={styles.paginationText}>More ({filteredExpenses.length - transactionShowCount} left)</Text>
+                            <Text style={styles.paginationText}>More ({filteredExpensesForDisplay.length - transactionShowCount} left)</Text>
                             <ChevronDown size={16} color="#2563eb" />
                           </TouchableOpacity>
                         )}
                       </View>
                     )}
-
-                    <View style={[styles.detailContainer, styles.detailLeft, { marginTop: 12, borderTopWidth: 0, paddingBottom: 0, paddingTop: 0 }]}>
-                        <Text style={styles.detailText}>Filtered by: {getMainFilterDetail()}</Text>
-                    </View>
                 </View>
                 </>
             )
@@ -909,8 +1109,6 @@ const handleEditExpense = (expense: Expense) => {
     </>
   );
 }
-
-// --- Styles ---
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
@@ -922,7 +1120,7 @@ const styles = StyleSheet.create({
   statsGrid: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   section: { backgroundColor: '#ffffff', borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: '#111827', marginBottom: 12 },
-  breakdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  breakdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
   breakdownLabel: { fontSize: 14, color: '#374151' },
   breakdownAmount: { fontSize: 14, fontWeight: '600', color: '#111827' },
   emptyState: { alignItems: 'center', paddingVertical: 40 },
@@ -995,19 +1193,19 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     marginBottom: 16,
-},
-drillDownText: {
+  },
+  drillDownText: {
     color: 'white',
     fontWeight: '600',
     flexShrink: 1,
     marginRight: 10,
-},
-clearDrillDownButton: {
+  },
+  clearDrillDownButton: {
     padding: 4,
     borderRadius: 10,
     backgroundColor: '#3b82f6',
-},
-paginationControls: {
+  },
+  paginationControls: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 10,
@@ -1015,88 +1213,206 @@ paginationControls: {
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
     paddingTop: 8,
-},
-moreButton: {
+  },
+  moreButton: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 6,
     borderRadius: 6,
     backgroundColor: '#e0f2fe',
-},
-collapseButton: {
+  },
+  collapseButton: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 6,
     borderRadius: 6,
     backgroundColor: '#e0f2fe',
-},
-paginationText: {
+  },
+  paginationText: {
     color: '#2563eb',
     fontWeight: '600',
     fontSize: 12,
     marginRight: 4,
-},
-// New styles for the detail text at the bottom of sections
-detailContainer: {
+  },
+  detailContainer: {
     flexDirection: 'row',
-    justifyContent: 'flex-end', // Default to right
+    justifyContent: 'flex-end',
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
     alignSelf: 'stretch',
-},
-detailLeft: {
+  },
+  detailLeft: {
     justifyContent: 'flex-start',
-},
-detailRight: {
+  },
+  detailRight: {
     justifyContent: 'flex-end',
-},
-detailText: {
+  },
+  detailText: {
     fontSize: 11,
     color: '#9ca3af',
     fontStyle: 'italic',
     flexShrink: 1,
-},
-// --- STYLES FOR THE NEW EXPENSE LIST DESIGN ---
-expenseItemContainer: {
+  },
+  expenseItemContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
-},
-expenseItemLeft: {
+  },
+  expenseItemLeft: {
     flex: 1,
     marginRight: 10,
-},
-expenseItemRight: {
+  },
+  expenseItemRight: {
     flexDirection: 'row',
     alignItems: 'center',
-},
-expenseItemDescription: {
+  },
+  expenseItemDescription: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1f2937',
-},
-expenseItemMeta: {
+  },
+  expenseItemMeta: {
     fontSize: 12,
     color: '#6b7280',
     marginTop: 2,
-},
-expenseItemAmount: {
+  },
+  expenseItemAmount: {
     fontSize: 16,
     fontWeight: '700',
     color: '#111827',
     marginRight: 16,
-},
-expenseItemActions: {
+  },
+  expenseItemActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-},
-actionButton: {
+  },
+  actionButton: {
     padding: 4,
-},
+  },
+  comparisonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 8,
+  },
+  comparisonCard: {
+    flex: 1,
+    minWidth: '47%',
+    backgroundColor: '#f9fafb',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  comparisonCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  comparisonLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '500',
+    flex: 1,
+  },
+  comparisonBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  comparisonText: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 2,
+  },
+  comparisonValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  expensesList: {
+    marginTop: 8,
+  },
+  expenseRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  expenseLabel: {
+    fontSize: 14,
+    color: '#374151',
+  },
+  expenseValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  expenseValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    marginRight: 8,
+  },
+  indicatorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  percentageText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginLeft: 4,
+  },
+  // ADD THESE STYLES:
+  transactionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sortControls: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  sortButtonActive: {
+    backgroundColor: '#dbeafe',
+    borderColor: '#60a5fa',
+  },
+  sortButtonText: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  sortButtonTextActive: {
+    color: '#2563eb',
+    fontWeight: '600',
+  },
 });
+
+if (__DEV__) {
+  activateKeepAwake(); // Only activate in development mode
+}
