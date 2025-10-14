@@ -10,6 +10,7 @@ import {
   Alert,
   BackHandler,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
 import { updateExpenseInGoogleSheet } from '@/utils/googleSheets';
@@ -180,107 +181,109 @@ export default function UpdateExpense() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Text style={styles.title}>Update Expense</Text>
+    <SafeAreaView style={{ flex: 1 }} edges={['bottom', 'top']}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+        <Text style={styles.title}>Update Expense</Text>
 
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Email *</Text>
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="your.email@example.com"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-      </View>
-
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Date *</Text>
-        <DatePicker value={date} onChange={setDate} />
-      </View>
-
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Category *</Text>
-        <Dropdown
-          value={category}
-          onChange={(value) => {
-            setCategory(value);
-            setSubCategory('');
-          }}
-          options={CATEGORIES}
-          placeholder="Select category"
-        />
-      </View>
-
-      {subCategoryOptions.length > 0 && (
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Sub-Category *</Text>
-          <Dropdown
-            value={subCategory}
-            onChange={setSubCategory}
-            options={subCategoryOptions}
-            placeholder="Select sub-category"
+          <Text style={styles.label}>Email *</Text>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="your.email@example.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
           />
         </View>
-      )}
 
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Item *</Text>
-        <TextInput
-          style={styles.input}
-          value={item}
-          onChangeText={setItem}
-          placeholder="What did you spend on?"
-        />
-      </View>
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Date *</Text>
+          <DatePicker value={date} onChange={setDate} />
+        </View>
 
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Shop/Site/Person Name</Text>
-        <TextInput
-          style={styles.input}
-          value={shopName}
-          onChangeText={setShopName}
-          placeholder="Vendor name"
-        />
-      </View>
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Category *</Text>
+          <Dropdown
+            value={category}
+            onChange={(value) => {
+              setCategory(value);
+              setSubCategory('');
+            }}
+            options={CATEGORIES}
+            placeholder="Select category"
+          />
+        </View>
 
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Amount *</Text>
-        <TextInput
-          style={styles.input}
-          value={amount}
-          onChangeText={setAmount}
-          placeholder="0.00"
-          keyboardType="numeric"
-        />
-      </View>
+        {subCategoryOptions.length > 0 && (
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Sub-Category *</Text>
+            <Dropdown
+              value={subCategory}
+              onChange={setSubCategory}
+              options={subCategoryOptions}
+              placeholder="Select sub-category"
+            />
+          </View>
+        )}
 
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Mode of Payment *</Text>
-        <Dropdown
-          value={paymentMode}
-          onChange={setPaymentMode}
-          options={['Cash', 'Card', 'Online']}
-          placeholder="Select payment mode"
-        />
-      </View>
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Item *</Text>
+          <TextInput
+            style={styles.input}
+            value={item}
+            onChangeText={setItem}
+            placeholder="What did you spend on?"
+          />
+        </View>
 
-      <View style={styles.formGroup}>
-        <Text style={styles.label}>Labels</Text>
-        <LabelSelector value={labels} onChange={setLabels} />
-      </View>
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Shop/Site/Person Name</Text>
+          <TextInput
+            style={styles.input}
+            value={shopName}
+            onChangeText={setShopName}
+            placeholder="Vendor name"
+          />
+        </View>
 
-      <TouchableOpacity
-        style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-        onPress={handleSubmit}
-        disabled={isSubmitting}
-      >
-        <Text style={styles.submitButtonText}>
-          {isSubmitting ? 'Saving...' : 'Update Expense'}
-        </Text>
-      </TouchableOpacity>
-    </ScrollView>
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Amount *</Text>
+          <TextInput
+            style={styles.input}
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="0.00"
+            keyboardType="numeric"
+          />
+        </View>
+
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Mode of Payment *</Text>
+          <Dropdown
+            value={paymentMode}
+            onChange={setPaymentMode}
+            options={['Cash', 'Card', 'Online']}
+            placeholder="Select payment mode"
+          />
+        </View>
+
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Labels</Text>
+          <LabelSelector value={labels} onChange={setLabels} />
+        </View>
+
+        <TouchableOpacity
+          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+          onPress={handleSubmit}
+          disabled={isSubmitting}
+        >
+          <Text style={styles.submitButtonText}>
+            {isSubmitting ? 'Saving...' : 'Update Expense'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
