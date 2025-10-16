@@ -181,127 +181,151 @@ export default function UpdateExpense() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1 }} edges={['bottom', 'top']}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-        <Text style={styles.title}>Update Expense</Text>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Email *</Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="your.email@example.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.container}>
+        {/* Fixed Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Update Expense</Text>
         </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Date *</Text>
-          <DatePicker value={date} onChange={setDate} />
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Category *</Text>
-          <Dropdown
-            value={category}
-            onChange={(value) => {
-              setCategory(value);
-              setSubCategory('');
-            }}
-            options={CATEGORIES}
-            placeholder="Select category"
-          />
-        </View>
-
-        {subCategoryOptions.length > 0 && (
+        {/* Scrollable Content */}
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Sub-Category *</Text>
-            <Dropdown
-              value={subCategory}
-              onChange={setSubCategory}
-              options={subCategoryOptions}
-              placeholder="Select sub-category"
+            <Text style={styles.label}>Email *</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="your.email@example.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
             />
           </View>
-        )}
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Item *</Text>
-          <TextInput
-            style={styles.input}
-            value={item}
-            onChangeText={setItem}
-            placeholder="What did you spend on?"
-          />
-        </View>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Date *</Text>
+            <DatePicker value={date} onChange={setDate} />
+          </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Shop/Site/Person Name</Text>
-          <TextInput
-            style={styles.input}
-            value={shopName}
-            onChangeText={setShopName}
-            placeholder="Vendor name"
-          />
-        </View>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Category *</Text>
+            <Dropdown
+              value={category}
+              onChange={(value) => {
+                setCategory(value);
+                setSubCategory('');
+              }}
+              options={CATEGORIES}
+              placeholder="Select category"
+            />
+          </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Amount *</Text>
-          <TextInput
-            style={styles.input}
-            value={amount}
-            onChangeText={setAmount}
-            placeholder="0.00"
-            keyboardType="numeric"
-          />
-        </View>
+          {subCategoryOptions.length > 0 && (
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Sub-Category *</Text>
+              <Dropdown
+                value={subCategory}
+                onChange={setSubCategory}
+                options={subCategoryOptions}
+                placeholder="Select sub-category"
+              />
+            </View>
+          )}
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Mode of Payment *</Text>
-          <Dropdown
-            value={paymentMode}
-            onChange={setPaymentMode}
-            options={['Cash', 'Card', 'Online']}
-            placeholder="Select payment mode"
-          />
-        </View>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Item *</Text>
+            <TextInput
+              style={styles.input}
+              value={item}
+              onChangeText={setItem}
+              placeholder="What did you spend on?"
+            />
+          </View>
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Labels</Text>
-          <LabelSelector value={labels} onChange={setLabels} />
-        </View>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Shop/Site/Person Name</Text>
+            <TextInput
+              style={styles.input}
+              value={shopName}
+              onChangeText={setShopName}
+              placeholder="Vendor name"
+            />
+          </View>
 
-        <TouchableOpacity
-          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-          onPress={handleSubmit}
-          disabled={isSubmitting}
-        >
-          <Text style={styles.submitButtonText}>
-            {isSubmitting ? 'Saving...' : 'Update Expense'}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Amount *</Text>
+            <TextInput
+              style={styles.input}
+              value={amount}
+              onChangeText={setAmount}
+              placeholder="0.00"
+              keyboardType="numeric"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Mode of Payment *</Text>
+            <Dropdown
+              value={paymentMode}
+              onChange={setPaymentMode}
+              options={['Cash', 'Card', 'Online']}
+              placeholder="Select payment mode"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Labels</Text>
+            <LabelSelector value={labels} onChange={setLabels} />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={isSubmitting}
+          >
+            <Text style={styles.submitButtonText}>
+              {isSubmitting ? 'Saving...' : 'Update Expense'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f9fafb',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',
   },
+  header: {
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#111827',
+    letterSpacing: -0.3,
+  },
+  scrollView: {
+    flex: 1,
+  },
   contentContainer: {
     padding: 20,
     paddingBottom: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 24,
-    marginTop: 20,
   },
   formGroup: {
     marginBottom: 20,

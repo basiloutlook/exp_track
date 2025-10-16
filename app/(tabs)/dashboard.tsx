@@ -17,8 +17,9 @@ import { Expense } from '@/types/expense';
 import { Filter, Trash2, TrendingUp, Calendar, X, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Pencil } from 'lucide-react-native';
 import StatCard from '@/components/StatCard';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
-import DateTimePickerModal from "react-native-modal-datetime-picker";
+const DateTimePickerModal = require('react-native-modal-datetime-picker').default;
 import { activateKeepAwake, deactivateKeepAwake } from 'expo-keep-awake';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Quarter {
   label: string;
@@ -53,6 +54,382 @@ const calculateQuarters = (currentDate: Date): Quarter[] => {
 
   return quarters.reverse(); // Show oldest to newest
 };
+const styles = StyleSheet.create({
+  safeArea: {
+  flex: 1,
+  backgroundColor: '#f9fafb',
+},
+scrollView: {
+  flex: 1,
+},
+  container: { 
+  flex: 1, 
+  backgroundColor: '#f9fafb' 
+} ,
+  contentContainer: { 
+  padding: 20, 
+  paddingTop: 0,
+  paddingBottom: 40 
+},
+  header: { 
+  backgroundColor: '#ffffff',
+  paddingHorizontal: 20,
+  paddingVertical: 12,
+  borderBottomWidth: 1,
+  borderBottomColor: '#e5e7eb',
+  flexDirection: 'row', 
+  justifyContent: 'space-between', 
+  alignItems: 'center'
+},
+  title: { 
+  fontSize: 20,
+  fontWeight: '600',
+  color: '#111827',
+  letterSpacing: -0.3,
+},
+  filterButton: { backgroundColor: '#2563eb', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
+  filterButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
+  subCategoryContainer: {
+    marginLeft: 20,
+    marginTop: 8,
+    marginBottom: 8,
+    paddingLeft: 12,
+    borderLeftWidth: 2,
+    borderLeftColor: '#60a5fa',
+},
+subCategoryTitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#6b7280',
+    marginBottom: 6,
+},
+subCategoryOption: {
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: '#f9fafb',
+    marginBottom: 4,
+},
+subCategoryOptionSelected: {
+    backgroundColor: '#dbeafe',
+    borderWidth: 1,
+    borderColor: '#60a5fa',
+},
+subCategoryOptionText: {
+    fontSize: 13,
+    color: '#374151',
+},
+  statsGrid: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  section: { backgroundColor: '#ffffff', borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
+  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#111827', marginBottom: 12 },
+  breakdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  breakdownLabel: { fontSize: 14, color: '#374151' },
+  breakdownAmount: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  emptyState: { alignItems: 'center', paddingVertical: 40 },
+  emptyStateText: { fontSize: 18, fontWeight: '600', color: '#6b7280' },
+  chartContainer: { backgroundColor: 'white', borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
+  barChartItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  drilldownHeader: { marginBottom: 10 },
+  backButton: { color: '#2563eb', fontWeight: '600' },
+  maGrid: { flexDirection: 'row', justifyContent: 'space-around', flexWrap: 'wrap', gap: 10 },
+  maCard: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#f3f4f6',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  maValue: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  maLabel: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+  maComparison: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  maComparisonText: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 2,
+  },
+  redText: {
+    color: '#ef4444',
+  },
+  greenText: {
+    color: '#10b981',
+  },
+  grayText: {
+    color: '#9ca3af',
+  },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sidebarContainer: { 
+  flex: 1,
+  backgroundColor: '#f9fafb', 
+  padding: 20, 
+  shadowColor: '#000', 
+  shadowOffset: { width: -2, height: 0 }, 
+  shadowOpacity: 0.1, 
+  shadowRadius: 5, 
+  elevation: 10 
+},
+sidebarSafeArea: {
+  position: 'absolute',
+  right: 0,
+  top: 0,
+  bottom: 0,
+  width: '80%',
+  backgroundColor: '#f9fafb',
+},
+  sidebarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 12, marginBottom: 16 },
+  sidebarTitle: { fontSize: 20, fontWeight: '600' },
+  sidebarFooter: { paddingTop: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', flexDirection: 'row', gap: 12 },
+  sidebarButton: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
+  resetButton: { backgroundColor: '#e5e7eb' },
+  resetButtonText: { color: '#1f2937', fontWeight: '600' },
+  applyButton: { backgroundColor: '#2563eb' },
+  applyButtonText: { color: 'white', fontWeight: '600' },
+  filterSectionTitle: { fontSize: 16, fontWeight: '600', color: '#374151', marginTop: 10, marginBottom: 8 },
+  filterOption: { padding: 10, borderRadius: 6, backgroundColor: '#fff', marginBottom: 6 },
+  filterOptionSelected: { backgroundColor: '#dbeafe', borderWidth: 1, borderColor: '#60a5fa' },
+  filterOptionText: { color: '#1f2937' },
+  emptyText: { color: '#9ca3af', textAlign: 'center' },
+  dateFilterContainer: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 16, },
+  dateButton: { flex: 1, backgroundColor: '#fff', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb' },
+  dateLabel: { fontSize: 12, color: '#6b7280', marginBottom: 4, },
+  dateValue: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  drillDownIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#60a5fa',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  drillDownText: {
+    color: 'white',
+    fontWeight: '600',
+    flexShrink: 1,
+    marginRight: 10,
+  },
+  clearDrillDownButton: {
+    padding: 4,
+    borderRadius: 10,
+    backgroundColor: '#3b82f6',
+  },
+  paginationControls: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    paddingTop: 8,
+  },
+  moreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#e0f2fe',
+  },
+  collapseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#e0f2fe',
+  },
+  paginationText: {
+    color: '#2563eb',
+    fontWeight: '600',
+    fontSize: 12,
+    marginRight: 4,
+  },
+  detailContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    alignSelf: 'stretch',
+  },
+  detailLeft: {
+    justifyContent: 'flex-start',
+  },
+  detailRight: {
+    justifyContent: 'flex-end',
+  },
+  detailText: {
+    fontSize: 11,
+    color: '#9ca3af',
+    fontStyle: 'italic',
+    flexShrink: 1,
+  },
+  expenseItemContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  expenseItemLeft: {
+    flex: 1,
+    marginRight: 10,
+  },
+  expenseItemRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  expenseItemDescription: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  expenseItemMeta: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  expenseItemAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginRight: 16,
+  },
+  expenseItemActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  actionButton: {
+    padding: 4,
+  },
+  comparisonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 8,
+  },
+  comparisonCard: {
+    flex: 1,
+    minWidth: '47%',
+    backgroundColor: '#f9fafb',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  comparisonCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  comparisonLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '500',
+    flex: 1,
+  },
+  comparisonBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  comparisonText: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 2,
+  },
+  comparisonValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  expensesList: {
+    marginTop: 8,
+  },
+  expenseRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  expenseLabel: {
+    fontSize: 14,
+    color: '#374151',
+  },
+  expenseValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  expenseValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    marginRight: 8,
+  },
+  indicatorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  percentageText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginLeft: 4,
+  },
+  // ADD THESE STYLES:
+  transactionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sortControls: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  sortButtonActive: {
+    backgroundColor: '#dbeafe',
+    borderColor: '#60a5fa',
+  },
+  sortButtonText: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  sortButtonTextActive: {
+    color: '#2563eb',
+    fontWeight: '600',
+  },
+});
 
 const ExpenseList = ({ expenses, onEdit, onDelete }: { expenses: Expense[], onEdit: (expense: Expense) => void, onDelete: (id: string) => void }) => {
     return (
@@ -327,9 +704,10 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
       const currentLabels = localFilters.labels;
 
       return (
-        <Modal visible={visible} transparent={true} animationType="slide" onRequestClose={onClose}>
-          <Pressable style={styles.modalBackdrop} onPress={onClose} />
-          <View style={styles.sidebarContainer}>
+  <Modal visible={visible} transparent={true} animationType="slide" onRequestClose={onClose}>
+    <Pressable style={styles.modalBackdrop} onPress={onClose} />
+    <SafeAreaView style={styles.sidebarSafeArea} edges={['top', 'bottom']}>
+      <View style={styles.sidebarContainer}>
             <DateTimePickerModal
                 isVisible={isDatePickerVisible}
                 mode="date"
@@ -356,22 +734,31 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
                 </View>
 
                 <Text style={styles.filterSectionTitle}>Category</Text>
-                {(options?.categories || []).map((c: string) =>
-                    <TouchableOpacity key={c} onPress={() => selectCategory(c)} style={[styles.filterOption, currentCategory === c && styles.filterOptionSelected]}>
-                        <Text style={styles.filterOptionText}>{c}</Text>
+{(options?.categories || []).map((c: string) => (
+    <View key={c}>
+        <TouchableOpacity 
+            onPress={() => selectCategory(c)} 
+            style={[styles.filterOption, currentCategory === c && styles.filterOptionSelected]}
+        >
+            <Text style={styles.filterOptionText}>{c}</Text>
+        </TouchableOpacity>
+        
+        {currentCategory === c && (
+            <View style={styles.subCategoryContainer}>
+                <Text style={styles.subCategoryTitle}>Sub-Categories:</Text>
+                {(options?.categoryMap?.[c] || []).map((sc: string) => (
+                    <TouchableOpacity 
+                        key={sc} 
+                        onPress={() => selectSubCategory(sc)} 
+                        style={[styles.subCategoryOption, currentSubCategory === sc && styles.subCategoryOptionSelected]}
+                    >
+                        <Text style={styles.subCategoryOptionText}>{sc}</Text>
                     </TouchableOpacity>
-                )}
-
-                {currentCategory && (
-                    <>
-                        <Text style={styles.filterSectionTitle}>Sub-Category (in {currentCategory})</Text>
-                        {(options?.subCategories || []).map((sc: string) =>
-                            <TouchableOpacity key={sc} onPress={() => selectSubCategory(sc)} style={[styles.filterOption, currentSubCategory === sc && styles.filterOptionSelected]}>
-                                <Text style={styles.filterOptionText}>{sc}</Text>
-                            </TouchableOpacity>
-                        )}
-                    </>
-                )}
+                ))}
+            </View>
+        )}
+    </View>
+))}
 
                 <Text style={styles.filterSectionTitle}>Labels</Text>
                 {(options?.labels || []).map((l: string) =>
@@ -390,9 +777,11 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
                     <Text style={styles.applyButtonText}>Apply</Text>
                 </TouchableOpacity>
             </View>
-          </View>
-        </Modal>
-      );
+      </View>
+    </SafeAreaView>
+  </Modal>
+);
+
 };
 
 const MovingAverageCard = ({ title, maValue, comparison }: {
@@ -566,341 +955,395 @@ export default function Dashboard() {
     setTransactionShowCount(prev => Math.max(ITEMS_PER_LOAD, prev - ITEMS_PER_LOAD));
   }, []);
 
+  const handleCurrentMonthDrillDown = () => {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  
+  setDrillDownDateFilter({
+    startDate: startOfMonth,
+    endDate: endOfMonth
+  });
+  setSelectedCategoryForDrill(null);
+  setSelectedSubCategoryForDrill(null);
+};
+
   // NEW: Comprehensive filtering logic
-  const { 
-    allExpenses, 
-    currentMonthExpenses, 
-    filteredExpensesForDisplay,
-    filterOptions 
-  } = useMemo(() => {
-    const categories = new Set<string>();
-    const subCategories = new Set<string>();
-    const labels = new Set<string>();
-    expenses.forEach(e => {
-      categories.add(e.category);
-      if(e.subCategory) subCategories.add(e.subCategory);
-      e.labels?.forEach(l => labels.add(l));
-    });
+const { 
+  allExpenses,
+  allExpensesForCharts,
+  currentMonthExpenses, 
+  filteredExpensesForDisplay,
+  filterOptions 
+} = useMemo(() => {
+  const categories = new Set<string>();
+  const subCategories = new Set<string>();
+  const labels = new Set<string>();
+  expenses.forEach(e => {
+    categories.add(e.category);
+    if(e.subCategory) subCategories.add(e.subCategory);
+    e.labels?.forEach(l => labels.add(l));
+  });
 
-    const now = new Date();
+  const now = new Date();
 
-    // Current month expenses (NEVER FILTERED)
-    const currentMonth = expenses.filter(e => {
+  // Step 1: Apply only category/subcategory/label filters from sidebar (NOT date)
+  const categoryLabelFiltered = expenses.filter(e => {
+      if (filters.category && e.category !== filters.category) return false;
+      if (filters.subCategory && e.subCategory !== filters.subCategory) return false;
+      if (filters.labels.length > 0 && !filters.labels.every((l: string) => (e.labels || []).includes(l))) return false;
+      return true;
+  });
+
+  // Step 2: Apply CATEGORY drill-downs (for charts and current month)
+  let categoryDrillFiltered = categoryLabelFiltered;
+  
+  if (selectedCategoryForDrill) {
+      categoryDrillFiltered = categoryDrillFiltered.filter(e => e.category === selectedCategoryForDrill);
+  }
+  
+  if (selectedSubCategoryForDrill) {
+      categoryDrillFiltered = categoryDrillFiltered.filter(e => e.subCategory === selectedSubCategoryForDrill);
+  }
+
+  // Step 3: Apply ALL drill-downs (including date) for breakdown sections
+  let fullDrillDownFiltered = categoryLabelFiltered;
+
+  // Date drill-down (from clicking quarters/months)
+  if (drillDownDateFilter) {
+      fullDrillDownFiltered = fullDrillDownFiltered.filter(e => {
+          const expenseDate = new Date(e.date);
+          const startDate = new Date(drillDownDateFilter.startDate);
+          startDate.setHours(0, 0, 0, 0);
+          const endDate = new Date(drillDownDateFilter.endDate);
+          endDate.setHours(23, 59, 59, 999);
+          return expenseDate >= startDate && expenseDate <= endDate;
+      });
+  }
+
+  // Category drill-down
+  if (selectedCategoryForDrill) {
+      fullDrillDownFiltered = fullDrillDownFiltered.filter(e => e.category === selectedCategoryForDrill);
+  }
+
+  // Sub-category drill-down
+  if (selectedSubCategoryForDrill) {
+      fullDrillDownFiltered = fullDrillDownFiltered.filter(e => e.subCategory === selectedSubCategoryForDrill);
+  }
+
+  // Step 4: For display list only - apply sidebar date filter
+  const dateFiltered = fullDrillDownFiltered.filter(e => {
+      const expenseDate = new Date(e.date);
+      const startDate = new Date(filters.startDate);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = new Date(filters.endDate);
+      endDate.setHours(23, 59, 59, 999);
+      return expenseDate >= startDate && expenseDate <= endDate;
+  });
+
+  // Current month expenses - uses category/label filters + category drill-downs, NOT date drill-downs
+  const currentMonth = categoryDrillFiltered.filter(e => {
+      const d = new Date(e.date);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+
+  return {
+      allExpenses: fullDrillDownFiltered, // Category Breakdown & Total Expense (includes ALL drill-downs)
+      allExpensesForCharts: categoryDrillFiltered, // Quarterly/Past 3 Months/Moving Averages (includes category drill-downs, NO date drill-downs)
+      currentMonthExpenses: currentMonth, // Current month with category drill-downs
+      filteredExpensesForDisplay: dateFiltered, // Transaction list
+      filterOptions: {
+          categories: Array.from(categories).sort(),
+          subCategories: Array.from(subCategories).sort(),
+          labels: Array.from(labels).sort(),
+      }
+  };
+}, [expenses, filters, drillDownDateFilter, selectedCategoryForDrill, selectedSubCategoryForDrill]);
+
+// Chart calculations
+const {
+  totalExpense,
+  currentMonthTotal,
+  quarterlyData,
+  past3MonthsData,
+} = useMemo(() => {
+  const now = new Date();
+  const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+  // Quarterly data with comparisons
+  const quarters = calculateQuarters(now);
+
+  // Calculate Q0 (the quarter immediately before Q1) for comparison
+  const q0StartDate = new Date(quarters[0].startDate);
+  q0StartDate.setMonth(q0StartDate.getMonth() - 3);
+  const q0EndDate = new Date(quarters[0].startDate);
+  q0EndDate.setDate(q0EndDate.getDate() - 1);
+
+  const q0Value = allExpensesForCharts
+    .filter(e => {
+      const d = new Date(e.date);
+      return d >= q0StartDate && d <= q0EndDate;
+    })
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  const quarterlyData: QuarterData[] = quarters.map((q, index) => {
+    const value = allExpensesForCharts
+      .filter(e => {
         const d = new Date(e.date);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    });
+        return d >= q.startDate && d <= q.endDate;
+      })
+      .reduce((sum, e) => sum + e.amount, 0);
 
-    // Apply sidebar date filter
-    const dateFiltered = expenses.filter(e => {
-        const expenseDate = new Date(e.date);
-        const startDate = new Date(filters.startDate);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(filters.endDate);
-        endDate.setHours(23, 59, 59, 999);
-        return expenseDate >= startDate && expenseDate <= endDate;
-    });
-
-    // Apply sidebar category/label filters
-    const sidebarFiltered = dateFiltered.filter(e => {
-        if (filters.category && e.category !== filters.category) return false;
-        if (filters.subCategory && e.subCategory !== filters.subCategory) return false;
-        if (filters.labels.length > 0 && !filters.labels.every((l: string) => (e.labels || []).includes(l))) return false;
-        return true;
-    });
-
-    // Apply drill-down filters
-    let displayExpenses = sidebarFiltered;
-
-    // Date drill-down
-    if (drillDownDateFilter) {
-        displayExpenses = displayExpenses.filter(e => {
-            const expenseDate = new Date(e.date);
-            const startDate = new Date(drillDownDateFilter.startDate);
-            startDate.setHours(0, 0, 0, 0);
-            const endDate = new Date(drillDownDateFilter.endDate);
-            endDate.setHours(23, 59, 59, 999);
-            return expenseDate >= startDate && expenseDate <= endDate;
-        });
-    }
-
-    // Category drill-down
-    if (selectedCategoryForDrill) {
-        displayExpenses = displayExpenses.filter(e => e.category === selectedCategoryForDrill);
-    }
-
-    // Sub-category drill-down
-    if (selectedSubCategoryForDrill) {
-        displayExpenses = displayExpenses.filter(e => e.subCategory === selectedSubCategoryForDrill);
+    // Get previous quarter value for comparison
+    let previousQuarterValue = 0;
+    if (index === 0) {
+      // Q1 compares with Q0 (calculated above)
+      previousQuarterValue = q0Value;
+    } else {
+      // Q2, Q3, Q4 compare with the previous quarter in the array
+      const prevQuarter = quarters[index - 1];
+      previousQuarterValue = allExpensesForCharts
+        .filter(e => {
+          const d = new Date(e.date);
+          return d >= prevQuarter.startDate && d <= prevQuarter.endDate;
+        })
+        .reduce((sum, e) => sum + e.amount, 0);
     }
 
     return {
-        allExpenses: expenses,
-        currentMonthExpenses: currentMonth,
-        filteredExpensesForDisplay: displayExpenses,
-        filterOptions: {
-            categories: Array.from(categories).sort(),
-            subCategories: Array.from(subCategories).sort(),
-            labels: Array.from(labels).sort(),
-        }
+      label: q.label,
+      value: value,
+      startDate: q.startDate,
+      endDate: q.endDate,
+      valueChange: value - previousQuarterValue,
     };
-  }, [expenses, filters, drillDownDateFilter, selectedCategoryForDrill, selectedSubCategoryForDrill]);
+  });
+  quarterlyData.reverse();
 
-  // Chart calculations
-  const {
+  // Past 3 months data with comparisons
+  const past3MonthsData: QuarterData[] = [1, 2, 3].map(i => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = monthKey(d);
+
+    const start = new Date(d.getFullYear(), d.getMonth(), 1);
+    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+
+    const value = allExpensesForCharts
+      .filter(e => monthKey(new Date(e.date)) === key)
+      .reduce((s, e) => s + e.amount, 0);
+
+    // Compare with the month BEFORE this one
+    const prevMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    const previousMonthValue = allExpensesForCharts
+      .filter(e => {
+        return monthKey(new Date(e.date)) === monthKey(prevMonth);
+      })
+      .reduce((s, e) => s + e.amount, 0);
+
+    return {
+      label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
+      value: value,
+      startDate: start,
+      endDate: end,
+      valueChange: value - previousMonthValue,
+    };
+  });
+  past3MonthsData.reverse(); // Show newest to oldest (Sep, Aug, Jul)
+
+  const totalExpense = filteredExpensesForDisplay.reduce((s, e) => s + e.amount, 0);
+  const currentMonthTotal = currentMonthExpenses.reduce((s, e) => s + e.amount, 0);
+
+  return {
     totalExpense,
     currentMonthTotal,
     quarterlyData,
     past3MonthsData,
-  } = useMemo(() => {
-    const now = new Date();
-    const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+}, [allExpensesForCharts, currentMonthExpenses, filteredExpensesForDisplay]);
 
-    // Quarterly data with comparisons
-    const quarters = calculateQuarters(now);
-    const quarterlyData: QuarterData[] = quarters.map((q, index) => {
-      const value = allExpenses
-        .filter(e => {
-          const d = new Date(e.date);
-          return d >= q.startDate && d <= q.endDate;
-        })
-        .reduce((sum, e) => sum + e.amount, 0);
+const movingAverages = useMemo(() => {
+  // Moving averages use allExpensesForCharts (includes category drill-downs, no date filters/drill-downs)
+  const expensesToAverage = allExpensesForCharts;
 
-      const previousQuarterValue = index < quarters.length - 1
-        ? allExpenses
-            .filter(e => {
-              const d = new Date(e.date);
-              return d >= quarters[index + 1].startDate && d <= quarters[index + 1].endDate;
-            })
-            .reduce((sum, e) => sum + e.amount, 0)
-        : 0;
+  const now = new Date();
+  const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-      return {
-        label: q.label,
-        value: value,
-        startDate: q.startDate,
-        endDate: q.endDate,
-        valueChange: value - previousQuarterValue,
-      };
-    });
-    quarterlyData.reverse();
+  const monthlyMap: { [k: string]: number } = {};
+  expensesToAverage.forEach(e => {
+      const k = monthKey(new Date(e.date));
+      monthlyMap[k] = (monthlyMap[k] || 0) + e.amount;
+  });
 
-    // Past 3 months data with comparisons
-    const past3MonthsData: QuarterData[] = [3, 2, 1].reverse().map(i => {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = monthKey(d);
+  const calculateMAData = (months: number) => {
+      const currentPeriodValues = Array.from({ length: months }, (_, i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (i + 1), 1);
+          return monthlyMap[monthKey(d)] || 0;
+      });
+      const currentPeriodTotal = currentPeriodValues.reduce((s, v) => s + v, 0);
+      const maValue = currentPeriodTotal / months;
 
-      const start = new Date(d.getFullYear(), d.getMonth(), 1);
-      const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      const priorPeriodValues = Array.from({ length: months }, (_, i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (i + 1 + months), 1);
+          return monthlyMap[monthKey(d)] || 0;
+      });
+      const priorPeriodTotal = priorPeriodValues.reduce((s, v) => s + v, 0);
 
-      const value = allExpenses
-        .filter(e => monthKey(new Date(e.date)) === key)
-        .reduce((s, e) => s + e.amount, 0);
+      let percentageChange = 0;
+      let isIncrease = false;
+      let hasPriorData = false;
 
-      const previousMonthValue = allExpenses
-        .filter(e => {
-          const prevMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-          return monthKey(new Date(e.date)) === monthKey(prevMonth);
-        })
-        .reduce((s, e) => s + e.amount, 0);
+      if (priorPeriodTotal > 0) {
+          percentageChange = ((currentPeriodTotal - priorPeriodTotal) / priorPeriodTotal) * 100;
+          isIncrease = percentageChange > 0.01;
+          hasPriorData = true;
+      } else if (currentPeriodTotal > 0) {
+          percentageChange = 100;
+          isIncrease = true;
+          hasPriorData = true;
+      }
 
       return {
-        label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
-        value: value,
-        startDate: start,
-        endDate: end,
-        valueChange: value - previousMonthValue,
+          maValue,
+          comparison: {
+              percentageChange,
+              isIncrease,
+              hasPriorData,
+          }
       };
-    });
+  };
 
-    const totalExpense = filteredExpensesForDisplay.reduce((s, e) => s + e.amount, 0);
-    const currentMonthTotal = currentMonthExpenses.reduce((s, e) => s + e.amount, 0);
+  return {
+      ma3: calculateMAData(3),
+      ma6: calculateMAData(6),
+      ma12: calculateMAData(12),
+      ma36: calculateMAData(36),
+  };
+}, [allExpensesForCharts]);
 
-    return {
-      totalExpense,
-      currentMonthTotal,
-      quarterlyData,
-      past3MonthsData,
-    };
-  }, [allExpenses, currentMonthExpenses, filteredExpensesForDisplay]);
+const { categoryPieData, subCategoryPieData } = useMemo(() => {
+  const categoryTotals: { [k: string]: { value: number, name: string } } = {};
+  filteredExpensesForDisplay.forEach(e => {
+    if (!categoryTotals[e.category]) categoryTotals[e.category] = { value: 0, name: e.category };
+    categoryTotals[e.category].value += Number(e.amount) || 0;
+  });
 
-  const movingAverages = useMemo(() => {
-    // Moving averages use filtered expenses (respects sidebar filters, not drill-downs)
-    const expensesToAverage = expenses.filter(e => {
-        const expenseDate = new Date(e.date);
-        const startDate = new Date(filters.startDate);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(filters.endDate);
-        endDate.setHours(23, 59, 59, 999);
-        
-        if (expenseDate < startDate || expenseDate > endDate) return false;
-        if (filters.category && e.category !== filters.category) return false;
-        if (filters.subCategory && e.subCategory !== filters.subCategory) return false;
-        if (filters.labels.length > 0 && !filters.labels.every((l: string) => (e.labels || []).includes(l))) return false;
-        return true;
-    });
-
-    const now = new Date();
-    const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
-    const monthlyMap: { [k: string]: number } = {};
-    expensesToAverage.forEach(e => {
-        const k = monthKey(new Date(e.date));
-        monthlyMap[k] = (monthlyMap[k] || 0) + e.amount;
-    });
-
-    const calculateMAData = (months: number) => {
-        const currentPeriodValues = Array.from({ length: months }, (_, i) => {
-            const d = new Date(now.getFullYear(), now.getMonth() - (i + 1), 1);
-            return monthlyMap[monthKey(d)] || 0;
-        });
-        const currentPeriodTotal = currentPeriodValues.reduce((s, v) => s + v, 0);
-        const maValue = currentPeriodTotal / months;
-
-        const priorPeriodValues = Array.from({ length: months }, (_, i) => {
-            const d = new Date(now.getFullYear(), now.getMonth() - (i + 1 + months), 1);
-            return monthlyMap[monthKey(d)] || 0;
-        });
-        const priorPeriodTotal = priorPeriodValues.reduce((s, v) => s + v, 0);
-
-        let percentageChange = 0;
-        let isIncrease = false;
-        let hasPriorData = false;
-
-        if (priorPeriodTotal > 0) {
-            percentageChange = ((currentPeriodTotal - priorPeriodTotal) / priorPeriodTotal) * 100;
-            isIncrease = percentageChange > 0.01;
-            hasPriorData = true;
-        } else if (currentPeriodTotal > 0) {
-            percentageChange = 100;
-            isIncrease = true;
-            hasPriorData = true;
-        }
-
-        return {
-            maValue,
-            comparison: {
-                percentageChange,
-                isIncrease,
-                hasPriorData,
-            }
-        };
-    };
-
-    return {
-        ma3: calculateMAData(3),
-        ma6: calculateMAData(6),
-        ma12: calculateMAData(12),
-        ma36: calculateMAData(36),
-    };
-  }, [expenses, filters]);
-
-  const { categoryPieData, subCategoryPieData } = useMemo(() => {
-    const categoryTotals: { [k: string]: { value: number, name: string } } = {};
+  const subCategoryTotals: { [k: string]: { value: number, name: string } } = {};
+  if (selectedCategoryForDrill) {
     filteredExpensesForDisplay.forEach(e => {
-      if (!categoryTotals[e.category]) categoryTotals[e.category] = { value: 0, name: e.category };
-      categoryTotals[e.category].value += Number(e.amount) || 0;
+      if (e.category === selectedCategoryForDrill) {
+        const key = e.subCategory || 'Uncategorized';
+        if (!subCategoryTotals[key]) subCategoryTotals[key] = { value: 0, name: key };
+        subCategoryTotals[key].value += Number(e.amount) || 0;
+      }
     });
-
-    const subCategoryTotals: { [k: string]: { value: number, name: string } } = {};
-    if (selectedCategoryForDrill) {
-      filteredExpensesForDisplay.forEach(e => {
-        if (e.category === selectedCategoryForDrill) {
-          const key = e.subCategory || 'Uncategorized';
-          if (!subCategoryTotals[key]) subCategoryTotals[key] = { value: 0, name: key };
-          subCategoryTotals[key].value += Number(e.amount) || 0;
-        }
-      });
-    }
-    return {
-      categoryPieData: Object.values(categoryTotals),
-      subCategoryPieData: Object.values(subCategoryTotals),
-    };
-  }, [filteredExpensesForDisplay, selectedCategoryForDrill]);
-
-  const sortedTransactions = useMemo(() => {
-    const sorted = [...filteredExpensesForDisplay];
-    
-    if (sortBy === 'date') {
-      sorted.sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
-      });
-    } else if (sortBy === 'amount') {
-      sorted.sort((a, b) => {
-        return sortOrder === 'asc' ? a.amount - b.amount : b.amount - a.amount;
-      });
-    }
-    
-    return sorted;
-  }, [filteredExpensesForDisplay, sortBy, sortOrder]);
-
-  const getMainFilterDetail = () => {
-    let detail = '';
-    if (filters.category) {
-        detail += `Category: ${filters.category}`;
-        if (filters.subCategory) {
-            detail += ` / ${filters.subCategory}`;
-        }
-        detail += ' | ';
-    } else if (filters.subCategory) {
-         detail += `Sub-Category: ${filters.subCategory} | `;
-    }
-
-    if (filters.labels.length > 0) {
-        detail += `Labels: ${filters.labels.join(', ')} | `;
-    }
-
-    const startDateStr = filters.startDate.toLocaleDateString();
-    const endDateStr = filters.endDate.toLocaleDateString();
-    detail += `Date: ${startDateStr} - ${endDateStr}`;
-
-    return detail.trim();
+  }
+  return {
+    categoryPieData: Object.values(categoryTotals),
+    subCategoryPieData: Object.values(subCategoryTotals),
   };
+}, [filteredExpensesForDisplay, selectedCategoryForDrill]);
 
-  const getActiveDrillDownText = () => {
-    const parts = [];
-    
-    if (drillDownDateFilter) {
-        parts.push(`Date: ${new Date(drillDownDateFilter.startDate).toLocaleDateString()} to ${new Date(drillDownDateFilter.endDate).toLocaleDateString()}`);
-    }
-    
-    if (selectedCategoryForDrill) {
-        parts.push(`Category: ${selectedCategoryForDrill}`);
-    }
-    
-    if (selectedSubCategoryForDrill) {
-        parts.push(`Sub-Category: ${selectedSubCategoryForDrill}`);
-    }
-    
-    return parts.length > 0 ? parts.join(' | ') : '';
-  };
+const sortedTransactions = useMemo(() => {
+  const sorted = [...filteredExpensesForDisplay];
+  
+  if (sortBy === 'date') {
+    sorted.sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+    });
+  } else if (sortBy === 'amount') {
+    sorted.sort((a, b) => {
+      return sortOrder === 'asc' ? a.amount - b.amount : b.amount - a.amount;
+    });
+  }
+  
+  return sorted;
+}, [filteredExpensesForDisplay, sortBy, sortOrder]);
 
-  const hasActiveDrillDown = drillDownDateFilter || selectedCategoryForDrill || selectedSubCategoryForDrill;
+const getMainFilterDetail = () => {
+  let detail = '';
+  if (filters.category) {
+      detail += `Category: ${filters.category}`;
+      if (filters.subCategory) {
+          detail += ` / ${filters.subCategory}`;
+      }
+      detail += ' | ';
+  } else if (filters.subCategory) {
+       detail += `Sub-Category: ${filters.subCategory} | `;
+  }
 
-  return (
-    <>
-      <FilterSidebar
-        visible={filterOpen}
-        onClose={() => setFilterOpen(false)}
-        onApply={handleApplyFilters}
-        initialFilters={filters}
-        options={filterOptions}
-      />
-      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Dashboard</Text>
-          <TouchableOpacity
-            style={styles.filterButton}
-            onPress={() => setFilterOpen(true)}
-            disabled={expenses.length === 0}>
-            <Filter size={18} color="#ffffff" />
-            <Text style={styles.filterButtonText}>Filter</Text>
-          </TouchableOpacity>
-        </View>
+  if (filters.labels.length > 0) {
+      detail += `Labels: ${filters.labels.join(', ')} | `;
+  }
 
+  const startDateStr = filters.startDate.toLocaleDateString();
+  const endDateStr = filters.endDate.toLocaleDateString();
+  detail += `Date: ${startDateStr} - ${endDateStr}`;
+
+  return detail.trim();
+};
+
+const getActiveDrillDownText = () => {
+  const parts = [];
+  
+  if (drillDownDateFilter) {
+      const now = new Date();
+      const isCurrentMonth = 
+          drillDownDateFilter.startDate.getMonth() === now.getMonth() &&
+          drillDownDateFilter.startDate.getFullYear() === now.getFullYear() &&
+          drillDownDateFilter.endDate.getMonth() === now.getMonth() &&
+          drillDownDateFilter.endDate.getFullYear() === now.getFullYear();
+      
+      if (isCurrentMonth) {
+          parts.push(`Current Month (${new Date(drillDownDateFilter.startDate).toLocaleDateString('default', { month: 'short', year: 'numeric' })})`);
+      } else {
+          parts.push(`Date: ${new Date(drillDownDateFilter.startDate).toLocaleDateString()} to ${new Date(drillDownDateFilter.endDate).toLocaleDateString()}`);
+      }
+  }
+  
+  if (selectedCategoryForDrill) {
+      parts.push(`Category: ${selectedCategoryForDrill}`);
+  }
+  
+  if (selectedSubCategoryForDrill) {
+      parts.push(`Sub-Category: ${selectedSubCategoryForDrill}`);
+  }
+  
+  return parts.length > 0 ? parts.join(' | ') : '';
+};
+
+const hasActiveDrillDown = drillDownDateFilter || selectedCategoryForDrill || selectedSubCategoryForDrill;
+return (
+  <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <FilterSidebar
+      visible={filterOpen}
+      onClose={() => setFilterOpen(false)}
+      onApply={handleApplyFilters}
+      initialFilters={filters}
+      options={filterOptions}
+    />
+    <View style={styles.container}>
+      {/* Fixed Header */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Dashboard</Text>
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => setFilterOpen(true)}
+          disabled={expenses.length === 0}>
+          <Filter size={18} color="#ffffff" />
+          <Text style={styles.filterButtonText}>Filter</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Scrollable Content */}
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
         {hasActiveDrillDown && (
-            <View style={styles.drillDownIndicator}>
+          <View style={styles.drillDownIndicator}>
                 <Text style={styles.drillDownText}>
                     <Text style={{fontWeight: 'bold'}}>Active Drill-Down:</Text>
                     {' '}{getActiveDrillDownText()}
@@ -919,19 +1362,24 @@ export default function Dashboard() {
             ) : (
                 <>
                 <View style={styles.statsGrid}>
-                    <StatCard 
-                        icon={<TrendingUp size={24} color="#2563eb" />} 
-                        title="Total Expense" 
-                        value={`₹${totalExpense.toFixed(2)}`} 
-                        subtitle=""
-                    />
-                    <StatCard 
-                        icon={<Calendar size={24} color="#10b981" />} 
-                        title="Current Month" 
-                        value={`₹${currentMonthTotal.toFixed(2)}`} 
-                        subtitle=""
-                    />
-                </View>
+    <StatCard 
+        icon={<TrendingUp size={24} color="#2563eb" />} 
+        title="Total Expense" 
+        value={`₹${totalExpense.toFixed(2)}`} 
+        subtitle=""
+    />
+    <TouchableOpacity 
+        onPress={handleCurrentMonthDrillDown}
+        activeOpacity={0.7}
+    >
+        <StatCard 
+            icon={<Calendar size={24} color="#10b981" />} 
+            title="Current Month" 
+            value={`₹${currentMonthTotal.toFixed(2)}`} 
+            subtitle="Tap to drill down"
+        />
+    </TouchableOpacity>
+</View>
 
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Quarterly Expenses (Past Year)</Text>
@@ -1106,312 +1554,11 @@ export default function Dashboard() {
             )
         )}
       </ScrollView>
-    </>
+    </View>
+  </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  contentContainer: { padding: 20, paddingBottom: 40 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 24 },
-  title: { fontSize: 28, fontWeight: '700', color: '#111827' },
-  filterButton: { backgroundColor: '#2563eb', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
-  filterButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
-  statsGrid: { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  section: { backgroundColor: '#ffffff', borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#111827', marginBottom: 12 },
-  breakdownItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  breakdownLabel: { fontSize: 14, color: '#374151' },
-  breakdownAmount: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  emptyState: { alignItems: 'center', paddingVertical: 40 },
-  emptyStateText: { fontSize: 18, fontWeight: '600', color: '#6b7280' },
-  chartContainer: { backgroundColor: 'white', borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
-  barChartItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
-  drilldownHeader: { marginBottom: 10 },
-  backButton: { color: '#2563eb', fontWeight: '600' },
-  maGrid: { flexDirection: 'row', justifyContent: 'space-around', flexWrap: 'wrap', gap: 10 },
-  maCard: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: '#f3f4f6',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    position: 'relative',
-  },
-  maValue: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  maLabel: { fontSize: 12, color: '#6b7280', marginTop: 4 },
-  maComparison: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  maComparisonText: {
-    fontSize: 10,
-    fontWeight: '700',
-    marginLeft: 2,
-  },
-  redText: {
-    color: '#ef4444',
-  },
-  greenText: {
-    color: '#10b981',
-  },
-  grayText: {
-    color: '#9ca3af',
-  },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sidebarContainer: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '80%', backgroundColor: '#f9fafb', padding: 20, shadowColor: '#000', shadowOffset: { width: -2, height: 0 }, shadowOpacity: 0.1, shadowRadius: 5, elevation: 10 },
-  sidebarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 12, marginBottom: 16 },
-  sidebarTitle: { fontSize: 20, fontWeight: '600' },
-  sidebarFooter: { paddingTop: 16, borderTopWidth: 1, borderTopColor: '#e5e7eb', flexDirection: 'row', gap: 12 },
-  sidebarButton: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
-  resetButton: { backgroundColor: '#e5e7eb' },
-  resetButtonText: { color: '#1f2937', fontWeight: '600' },
-  applyButton: { backgroundColor: '#2563eb' },
-  applyButtonText: { color: 'white', fontWeight: '600' },
-  filterSectionTitle: { fontSize: 16, fontWeight: '600', color: '#374151', marginTop: 10, marginBottom: 8 },
-  filterOption: { padding: 10, borderRadius: 6, backgroundColor: '#fff', marginBottom: 6 },
-  filterOptionSelected: { backgroundColor: '#dbeafe', borderWidth: 1, borderColor: '#60a5fa' },
-  filterOptionText: { color: '#1f2937' },
-  emptyText: { color: '#9ca3af', textAlign: 'center' },
-  dateFilterContainer: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 16, },
-  dateButton: { flex: 1, backgroundColor: '#fff', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb' },
-  dateLabel: { fontSize: 12, color: '#6b7280', marginBottom: 4, },
-  dateValue: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  drillDownIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#60a5fa',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  drillDownText: {
-    color: 'white',
-    fontWeight: '600',
-    flexShrink: 1,
-    marginRight: 10,
-  },
-  clearDrillDownButton: {
-    padding: 4,
-    borderRadius: 10,
-    backgroundColor: '#3b82f6',
-  },
-  paginationControls: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    paddingTop: 8,
-  },
-  moreButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 6,
-    borderRadius: 6,
-    backgroundColor: '#e0f2fe',
-  },
-  collapseButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 6,
-    borderRadius: 6,
-    backgroundColor: '#e0f2fe',
-  },
-  paginationText: {
-    color: '#2563eb',
-    fontWeight: '600',
-    fontSize: 12,
-    marginRight: 4,
-  },
-  detailContainer: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    alignSelf: 'stretch',
-  },
-  detailLeft: {
-    justifyContent: 'flex-start',
-  },
-  detailRight: {
-    justifyContent: 'flex-end',
-  },
-  detailText: {
-    fontSize: 11,
-    color: '#9ca3af',
-    fontStyle: 'italic',
-    flexShrink: 1,
-  },
-  expenseItemContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  expenseItemLeft: {
-    flex: 1,
-    marginRight: 10,
-  },
-  expenseItemRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  expenseItemDescription: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  expenseItemMeta: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 2,
-  },
-  expenseItemAmount: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    marginRight: 16,
-  },
-  expenseItemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  actionButton: {
-    padding: 4,
-  },
-  comparisonGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 8,
-  },
-  comparisonCard: {
-    flex: 1,
-    minWidth: '47%',
-    backgroundColor: '#f9fafb',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  comparisonCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  comparisonLabel: {
-    fontSize: 12,
-    color: '#6b7280',
-    fontWeight: '500',
-    flex: 1,
-  },
-  comparisonBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-  },
-  comparisonText: {
-    fontSize: 10,
-    fontWeight: '700',
-    marginLeft: 2,
-  },
-  comparisonValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  expensesList: {
-    marginTop: 8,
-  },
-  expenseRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  expenseLabel: {
-    fontSize: 14,
-    color: '#374151',
-  },
-  expenseValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  expenseValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    marginRight: 8,
-  },
-  indicatorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  percentageText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginLeft: 4,
-  },
-  // ADD THESE STYLES:
-  transactionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sortControls: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  sortButtonActive: {
-    backgroundColor: '#dbeafe',
-    borderColor: '#60a5fa',
-  },
-  sortButtonText: {
-    fontSize: 12,
-    color: '#6b7280',
-    fontWeight: '500',
-  },
-  sortButtonTextActive: {
-    color: '#2563eb',
-    fontWeight: '600',
-  },
-});
 
 if (__DEV__) {
   activateKeepAwake(); // Only activate in development mode

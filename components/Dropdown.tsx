@@ -7,6 +7,7 @@ import {
   FlatList,
   StyleSheet,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronDown } from 'lucide-react-native';
 
 interface DropdownProps {
@@ -18,6 +19,7 @@ interface DropdownProps {
 
 export default function Dropdown({ value, onChange, options, placeholder }: DropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const handleSelect = (option: string) => {
     onChange(option);
@@ -44,35 +46,41 @@ export default function Dropdown({ value, onChange, options, placeholder }: Drop
           style={styles.modalOverlay}
           activeOpacity={1}
           onPress={() => setIsOpen(false)}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {placeholder || 'Select an option'}
-              </Text>
-              <TouchableOpacity onPress={() => setIsOpen(false)}>
-                <Text style={styles.closeButton}>Close</Text>
-              </TouchableOpacity>
-            </View>
-            <FlatList
-              data={options}
-              keyExtractor={(item) => item}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.option,
-                    item === value && styles.optionSelected,
-                  ]}
-                  onPress={() => handleSelect(item)}>
-                  <Text
-                    style={[
-                      styles.optionText,
-                      item === value && styles.optionTextSelected,
-                    ]}>
-                    {item}
-                  </Text>
+          <View style={styles.modalWrapper}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {placeholder || 'Select an option'}
+                </Text>
+                <TouchableOpacity onPress={() => setIsOpen(false)}>
+                  <Text style={styles.closeButton}>Close</Text>
                 </TouchableOpacity>
-              )}
-            />
+              </View>
+              <FlatList
+                data={options}
+                keyExtractor={(item) => item}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.option,
+                      item === value && styles.optionSelected,
+                    ]}
+                    onPress={() => handleSelect(item)}>
+                    <Text
+                      style={[
+                        styles.optionText,
+                        item === value && styles.optionTextSelected,
+                      ]}>
+                      {item}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{
+                  paddingBottom: Math.max(insets.bottom, 20),
+                }}
+              />
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -103,11 +111,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
+  modalWrapper: {
+    maxHeight: '70%',
+  },
   modalContent: {
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    overflow: 'hidden',
+    maxHeight: '100%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -116,6 +128,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
   },
   modalTitle: {
     fontSize: 18,
