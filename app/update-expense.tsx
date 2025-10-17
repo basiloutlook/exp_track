@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
 import { updateExpenseInGoogleSheet } from '@/utils/googleSheets';
+import { alertEngine } from '@/utils/alertEngine';
 import { Expense } from '@/types/expense';
 import DatePicker from '@/components/DatePicker';
 import Dropdown from '@/components/Dropdown';
@@ -122,63 +123,67 @@ export default function UpdateExpense() {
   );
 
   const handleSubmit = async () => {
-    if (
-      !email.trim() ||
-      !category ||
-      !subCategory ||
-      !item.trim() ||
-      !amount.trim() ||
-      isNaN(Number(amount)) ||
-      !paymentMode
-    ) {
-      Alert.alert('Error', 'Please fill all required fields');
-      return;
-    }
+  if (
+    !email.trim() ||
+    !category ||
+    !subCategory ||
+    !item.trim() ||
+    !amount.trim() ||
+    isNaN(Number(amount)) ||
+    !paymentMode
+  ) {
+    Alert.alert('Error', 'Please fill all required fields');
+    return;
+  }
 
-    if (!hasChanges()) {
-      Alert.alert('No Changes', 'No changes were made to this transaction.');
-      return;
-    }
+  if (!hasChanges()) {
+    Alert.alert('No Changes', 'No changes were made to this transaction.');
+    return;
+  }
 
-    setIsSubmitting(true);
+  setIsSubmitting(true);
 
-    try {
-      const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-        .toISOString()
-        .split('T')[0];
+  try {
+    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+      .toISOString()
+      .split('T')[0];
 
-      const updatedExpense: Expense = {
-        id: expenseId!,
-        email: email.trim(),
-        date: localDate,
-        category,
-        subCategory,
-        item: item.trim(),
-        shopName: shopName.trim(),
-        amount: Number(amount),
-        paymentMode,
-        labels,
-        timestamp: originalExpense?.timestamp || new Date().toISOString(),
-      };
+    const updatedExpense: Expense = {
+      id: expenseId!,
+      email: email.trim(),
+      date: localDate,
+      category,
+      subCategory,
+      item: item.trim(),
+      shopName: shopName.trim(),
+      amount: Number(amount),
+      paymentMode,
+      labels,
+      timestamp: originalExpense?.timestamp || new Date().toISOString(),
+    };
 
-      await updateExpenseInGoogleSheet(updatedExpense);
+    await updateExpenseInGoogleSheet(updatedExpense);
 
-      Alert.alert('Success', 'Transaction updated successfully!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            resetForm();
-            router.replace('/(tabs)/dashboard');
-          },
+    // ✅ ADD THIS: Trigger notification check after update
+    const allExpenses = await storageService.getExpenses();
+    await alertEngine.triggerImmediateNotification(allExpenses || [], updatedExpense);
+
+    Alert.alert('Success', 'Transaction updated successfully!', [
+      {
+        text: 'OK',
+        onPress: () => {
+          resetForm();
+          router.replace('/(tabs)/dashboard');
         },
-      ]);
-    } catch (error) {
-      console.error('❌ Error updating expense:', error);
-      Alert.alert('Error', 'Failed to update expense. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+      },
+    ]);
+  } catch (error) {
+    console.error('❌ Error updating expense:', error);
+    Alert.alert('Error', 'Failed to update expense. Please try again.');
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>

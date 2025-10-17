@@ -10,6 +10,10 @@ import {
   Pressable,
 } from 'react-native';
 import { deleteExpenseFromGoogleSheet } from '@/utils/googleSheets';
+import { useAlerts } from "@/hooks/useAlerts";
+import { useNotifications } from "@/hooks/useNotifications";
+import NotificationBell from "@/components/NotificationBell";
+import AlertBanner from "@/components/AlertBanner";
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
@@ -28,10 +32,11 @@ interface Quarter {
 }
 
 // FIXED: Proper quarterly calculation
-const calculateQuarters = (currentDate: Date): Quarter[] => {
+// Add this line:
+  
+  const calculateQuarters = (currentDate: Date): Quarter[] => {
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
-
   const quarters: Quarter[] = [];
 
   // Calculate 4 complete quarters going backwards from current month
@@ -87,8 +92,12 @@ scrollView: {
   color: '#111827',
   letterSpacing: -0.3,
 },
-  filterButton: { backgroundColor: '#2563eb', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
-  filterButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
+  iconButton: {
+  padding: 8,
+  backgroundColor: '#f3f4f6',
+  borderRadius: 8,
+},
+
   subCategoryContainer: {
     marginLeft: 20,
     marginTop: 8,
@@ -478,7 +487,6 @@ const ExpenseList = ({ expenses, onEdit, onDelete }: { expenses: Expense[], onEd
         </View>
     );
 };
-
 const getDefaultStartDate = () => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth() - 12, 1);
@@ -820,13 +828,15 @@ type SortOrder = 'asc' | 'desc';
 
 export default function Dashboard() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const { currentAlert, dismissCurrentAlert } = useAlerts(expenses);
   const [isLoading, setIsLoading] = useState(true);
-  const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState<any>({ ...defaultFilters });
+  const [filterOpen, setFilterOpen] = useState(false);
   const [selectedCategoryForDrill, setSelectedCategoryForDrill] = useState<string | null>(null);
   const [selectedSubCategoryForDrill, setSelectedSubCategoryForDrill] = useState<string | null>(null);
   const [categoryShowCount, setCategoryShowCount] = useState(ITEMS_PER_LOAD);
   const [transactionShowCount, setTransactionShowCount] = useState(ITEMS_PER_LOAD);
+  const { refresh: refreshNotifications } = useNotifications();
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [drillDownDateFilter, setDrillDownDateFilter] = useState<{ startDate: Date, endDate: Date } | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>('date');
@@ -853,11 +863,16 @@ export default function Dashboard() {
       loadExpenses();
     }, [loadExpenses])
   );
-
+  
   useEffect(() => {
-    const currentDate = new Date();
-    setQuarters(calculateQuarters(currentDate));
-  }, []);
+  // Refresh notifications when screen loads or expenses change
+  refreshNotifications();
+}, [expenses, refreshNotifications]);
+
+useEffect(() => {
+  const currentDate = new Date();
+  setQuarters(calculateQuarters(currentDate));
+}, []);
 
   const handleDeleteExpense = async (id: string) => {
     Alert.alert(
@@ -1340,16 +1355,34 @@ return (
     />
     <View style={styles.container}>
       {/* Fixed Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Dashboard</Text>
-        <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setFilterOpen(true)}
-          disabled={expenses.length === 0}>
-          <Filter size={18} color="#ffffff" />
-          <Text style={styles.filterButtonText}>Filter</Text>
-        </TouchableOpacity>
-      </View>
+<View style={styles.header}>
+  <Text style={styles.title}>Dashboard</Text>
+
+  {/* Right-side icons */}
+  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+    {/* Filter icon button */}
+    <TouchableOpacity
+      onPress={() => setFilterOpen(true)}
+      disabled={expenses.length === 0}
+      style={styles.iconButton}
+    >
+      <Filter size={22} color="#2563eb" />
+    </TouchableOpacity>
+
+    {/* Notification bell aligned to far right */}
+    <NotificationBell size={24} />
+  </View>
+</View>
+
+{currentAlert && (
+  <AlertBanner
+    alert={currentAlert}
+    onDismiss={dismissCurrentAlert}
+    autoDismiss={true}
+    autoDismissDelay={5000}
+  />
+)}
+
 
       {/* Scrollable Content */}
       <ScrollView
