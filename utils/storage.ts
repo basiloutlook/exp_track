@@ -1,3 +1,4 @@
+// utils/storage.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Expense } from "@/types/expense";
 import {
@@ -11,7 +12,10 @@ const STORAGE_KEYS = {
   USER: "user",
   SETTINGS: "settings",
   LABELS: "labels",
+  EXPENSES_CACHE: "expenses_cache", // NEW
 };
+
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 async function saveData<T>(key: string, data: T): Promise<void> {
   try {
@@ -53,6 +57,62 @@ export const storageService = {
 
   async setExpenses(expenses: Expense[]): Promise<void> {
     await saveData(STORAGE_KEYS.EXPENSES, expenses);
+  },
+
+  // NEW: Cache management methods
+  async getCachedExpensesWithTimestamp(): Promise<{ expenses: Expense[], timestamp: number } | null> {
+    try {
+      const cached = await AsyncStorage.getItem(STORAGE_KEYS.EXPENSES_CACHE);
+      return cached ? JSON.parse(cached) : null;
+    } catch (error) {
+      console.error("❌ Error loading cache:", error);
+      return null;
+    }
+  },
+
+  async setCachedExpenses(expenses: Expense[]): Promise<void> {
+    try {
+      const cache = {
+        expenses,
+        timestamp: Date.now()
+      };
+      await AsyncStorage.setItem(STORAGE_KEYS.EXPENSES_CACHE, JSON.stringify(cache));
+      console.log(`💾 Cached ${expenses.length} expenses at ${new Date().toLocaleTimeString()}`);
+    } catch (error) {
+      console.error("❌ Error saving cache:", error);
+    }
+  },
+
+  async shouldRefreshCache(): Promise<boolean> {
+    try {
+      const cached = await this.getCachedExpensesWithTimestamp();
+      if (!cached) {
+        console.log("🔍 No cache found, refresh needed");
+        return true;
+      }
+      const age = Date.now() - cached.timestamp;
+      const shouldRefresh = age > CACHE_DURATION;
+      
+      if (shouldRefresh) {
+        console.log(`⏰ Cache expired (${Math.round(age / 1000)}s old), refresh needed`);
+      } else {
+        console.log(`✓ Cache fresh (${Math.round(age / 1000)}s old)`);
+      }
+      
+      return shouldRefresh;
+    } catch (error) {
+      console.error("❌ Error checking cache:", error);
+      return true; // Refresh on error
+    }
+  },
+
+  async invalidateCache(): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEYS.EXPENSES_CACHE);
+      console.log("🗑️ Cache invalidated");
+    } catch (error) {
+      console.error("❌ Error invalidating cache:", error);
+    }
   },
 
   // NEW: Add expense locally only (no Google Sheet sync)

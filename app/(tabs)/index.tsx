@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
 
 // ✅ Delete Expense function (optional)
 const GOOGLE_SHEET_URL =
-  'https://script.google.com/macros/s/AKfycby0W_NemJENrAyV_U3W7sqVAozLqXLRyUm_TTn1te4aWGi4ZN8AJz8VuPavfN8KxD4C/exec';
+  'https://script.google.com/macros/s/AKfycbw_b9Sua0rVLKnEksLZ69XcZ6WzstiW8LVKElUSx8WKSUYZGfmvt-VIp1Gz6wLrWyEo/exec';
 
 export async function deleteExpenseFromGoogleSheetLocal(id: string): Promise<void> {
   try {

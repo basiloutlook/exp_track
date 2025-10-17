@@ -1,8 +1,9 @@
+// utils/googleSheets.ts
 import { Expense } from "@/types/expense";
+import { storageService } from "./storage";
 
 const GOOGLE_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbz6kV2pRDR-3bEEVWAOZZPgmZg-Ju-jJ1iiWPxJd5l72ROLegJ1a7n4u1YbvsUXzmsL/exec";
-  
+  "https://script.google.com/macros/s/AKfycbw_b9Sua0rVLKnEksLZ69XcZ6WzstiW8LVKElUSx8WKSUYZGfmvt-VIp1Gz6wLrWyEo/exec";
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.
@@ -18,17 +19,47 @@ function normalizeRowDate(raw: any): string {
 }
 
 /**
- * Fetch all expenses from Google Sheet.
+ * Fetch all expenses from Google Sheet with caching.
+ * Uses cached data if available and fresh (within 5 minutes).
+ * Falls back to cache if network request fails.
  */
 export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
   try {
-    const response = await fetch(GOOGLE_SHEET_URL);
+    // Check if we should use cached data
+    const shouldRefresh = await storageService.shouldRefreshCache();
+    
+    if (!shouldRefresh) {
+      const cached = await storageService.getCachedExpensesWithTimestamp();
+      if (cached && cached.expenses.length > 0) {
+        console.log("📦 Using cached data (fresh)");
+        return cached.expenses;
+      }
+    }
+
+    // Fetch fresh data from Google Sheets
+    console.log("🌐 Fetching fresh data from Google Sheets");
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     const data = await response.json();
 
-    if (!Array.isArray(data)) return [];
+    if (!Array.isArray(data)) {
+      console.warn("⚠️ Invalid data format from Google Sheets");
+      // Try to return cached data as fallback
+      const cached = await storageService.getCachedExpensesWithTimestamp();
+      return cached?.expenses || [];
+    }
 
-    return data.map((row: any, index: number) => {
-      const expense = {
+    const expenses = data.map((row: any, index: number) => {
+      const expense: Expense = {
         id: row.id || row.ID || row.Id || `sheet-${index + 1}`,
         date: normalizeRowDate(row),
         category: row.category || row.Category || "",
@@ -53,14 +84,93 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
       };
       return expense;
     });
+
+    // Cache the fresh data
+    await storageService.setCachedExpenses(expenses);
+    console.log(`✅ Fetched and cached ${expenses.length} expenses`);
+
+    return expenses;
   } catch (error) {
     console.error("❌ Error fetching Google Sheet data:", error);
+    
+    // Fallback to cached data if available
+    const cached = await storageService.getCachedExpensesWithTimestamp();
+    if (cached && cached.expenses.length > 0) {
+      console.log("📦 Using cached data (fallback due to error)");
+      return cached.expenses;
+    }
+    
+    // If no cache available, return empty array
+    console.warn("⚠️ No cached data available, returning empty array");
     return [];
   }
 }
 
 /**
+ * Force refresh expenses from Google Sheet, bypassing cache.
+ * Use this after CRUD operations to ensure data is up-to-date.
+ */
+export async function forceRefreshExpenses(): Promise<Expense[]> {
+  try {
+    console.log("🔄 Force refreshing data from Google Sheets");
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: 'GET',
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error("Invalid data format from Google Sheets");
+    }
+
+    const expenses = data.map((row: any, index: number) => {
+      const expense: Expense = {
+        id: row.id || row.ID || row.Id || `sheet-${index + 1}`,
+        date: normalizeRowDate(row),
+        category: row.category || row.Category || "",
+        subCategory:
+          row.subCategory || row["Sub Category"] || row.subcategory || "",
+        item: row.item || row.Item || "",
+        amount: parseFloat(row.amount || row.Amount || 0) || 0,
+        email: row.email || row["Email Address"] || "",
+        shopName:
+          row.shopName || row.shop || row["Shop/Site/Person name"] || row.Shop || "",
+        paymentMode: row.paymentMode || row["Mode of payment"] || "",
+        labels:
+          typeof row.labels === "string"
+            ? row.labels
+                .split(",")
+                .map((l: string) => l.trim())
+                .filter(Boolean)
+            : Array.isArray(row.labels)
+            ? row.labels
+            : [],
+        timestamp: row.timestamp || row.Timestamp || "",
+      };
+      return expense;
+    });
+
+    // Update cache with fresh data
+    await storageService.setCachedExpenses(expenses);
+    console.log(`✅ Force refreshed and cached ${expenses.length} expenses`);
+
+    return expenses;
+  } catch (error) {
+    console.error("❌ Error force refreshing Google Sheet data:", error);
+    throw error;
+  }
+}
+
+/**
  * Add a new expense record to Google Sheet.
+ * Invalidates cache after successful addition.
  */
 export async function addExpenseToGoogleSheet(
   expense: Expense
@@ -93,7 +203,11 @@ export async function addExpenseToGoogleSheet(
 
     const result = await response.json();
     if (!result.success) throw new Error(result.message || "Failed to add");
+    
     console.log("✅ Added to Google Sheet:", result.message || "");
+    
+    // Invalidate cache to force refresh on next load
+    await storageService.invalidateCache();
   } catch (error) {
     console.error("❌ Error adding to Google Sheet:", error);
     throw error;
@@ -102,6 +216,7 @@ export async function addExpenseToGoogleSheet(
 
 /**
  * Update an existing expense record by ID.
+ * Invalidates cache after successful update.
  */
 export async function updateExpenseInGoogleSheet(
   expense: Expense
@@ -139,7 +254,11 @@ export async function updateExpenseInGoogleSheet(
     const result = await response.json();
     if (!result.success)
       throw new Error(result.message || "Failed to update expense");
+    
     console.log("✅ Updated expense in Google Sheet:", result.message || "");
+    
+    // Invalidate cache to force refresh on next load
+    await storageService.invalidateCache();
   } catch (error) {
     console.error("❌ Error updating expense in Google Sheet:", error);
     throw error;
@@ -148,10 +267,11 @@ export async function updateExpenseInGoogleSheet(
 
 /**
  * Delete an expense record from Google Sheet by ID.
+ * Invalidates cache after successful deletion.
  */
 export async function deleteExpenseFromGoogleSheet(id: string): Promise<void> {
   try {
-    const payload = { action: 'delete', id }; // Ensure correct payload
+    const payload = { action: 'delete', id };
     console.log('📤 Sending DELETE request to Google Sheet:', payload);
 
     const response = await fetch(GOOGLE_SHEET_URL, {
@@ -162,7 +282,11 @@ export async function deleteExpenseFromGoogleSheet(id: string): Promise<void> {
 
     const result = await response.json();
     if (!result.success) throw new Error(result.message || 'Failed to delete expense');
+    
     console.log('🗑️ Deleted expense from Google Sheet:', id);
+    
+    // Invalidate cache to force refresh on next load
+    await storageService.invalidateCache();
   } catch (error) {
     console.error('❌ Error deleting expense from Google Sheet:', error);
     throw error;
