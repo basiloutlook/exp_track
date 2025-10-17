@@ -508,10 +508,10 @@ const ComparisonCard = ({ item, onPress }: { item: QuarterData; onPress?: (item:
     const percentageChange = hasPriorData ? (item.valueChange / (item.value - item.valueChange)) * 100 : 0;
 
     const color = hasPriorData
-        ? (isIncrease ? styles.greenText : styles.redText)
+        ? (isIncrease ? styles.redText : styles.greenText)
         : styles.grayText;
     const ArrowIcon = isIncrease ? ArrowUp : ArrowDown;
-    const percentage = Math.abs(percentageChange).toFixed(1);
+    const percentage = Math.abs(percentageChange).toFixed(0);
 
     return (
         <TouchableOpacity
@@ -732,6 +732,12 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
                         <Text style={styles.dateValue}>{localFilters.endDate instanceof Date ? localFilters.endDate.toLocaleDateString() : '—'}</Text>
                     </TouchableOpacity>
                 </View>
+<Text style={styles.filterSectionTitle}>Labels</Text>
+                {(options?.labels || []).map((l: string) =>
+                    <TouchableOpacity key={l} onPress={() => toggleLabel(l)} style={[styles.filterOption, currentLabels.includes(l) && styles.filterOptionSelected]}>
+                        <Text style={styles.filterOptionText}>{l}</Text>
+                    </TouchableOpacity>
+                )}
 
                 <Text style={styles.filterSectionTitle}>Category</Text>
 {(options?.categories || []).map((c: string) => (
@@ -745,7 +751,6 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
         
         {currentCategory === c && (
             <View style={styles.subCategoryContainer}>
-                <Text style={styles.subCategoryTitle}>Sub-Categories:</Text>
                 {(options?.categoryMap?.[c] || []).map((sc: string) => (
                     <TouchableOpacity 
                         key={sc} 
@@ -760,13 +765,7 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
     </View>
 ))}
 
-                <Text style={styles.filterSectionTitle}>Labels</Text>
-                {(options?.labels || []).map((l: string) =>
-                    <TouchableOpacity key={l} onPress={() => toggleLabel(l)} style={[styles.filterOption, currentLabels.includes(l) && styles.filterOptionSelected]}>
-                        <Text style={styles.filterOptionText}>{l}</Text>
-                    </TouchableOpacity>
-                )}
-
+                
             </ScrollView>
 
             <View style={styles.sidebarFooter}>
@@ -798,7 +797,7 @@ const MovingAverageCard = ({ title, maValue, comparison }: {
         ? (isIncrease ? styles.redText : styles.greenText)
         : styles.grayText;
     const ArrowIcon = isIncrease ? ArrowUp : ArrowDown;
-    const percentage = Math.abs(percentageChange).toFixed(1);
+    const percentage = Math.abs(percentageChange).toFixed(0);
 
     return (
         <View style={styles.maCard}>
@@ -1053,10 +1052,26 @@ const {
       currentMonthExpenses: currentMonth, // Current month with category drill-downs
       filteredExpensesForDisplay: dateFiltered, // Transaction list
       filterOptions: {
-          categories: Array.from(categories).sort(),
-          subCategories: Array.from(subCategories).sort(),
-          labels: Array.from(labels).sort(),
-      }
+    categories: Array.from(categories).sort(),
+    subCategories: Array.from(subCategories).sort(),
+    labels: Array.from(labels).sort(),
+    categoryMap: (() => {
+        const map: { [key: string]: string[] } = {};
+        expenses.forEach(e => {
+            if (!map[e.category]) {
+                map[e.category] = [];
+            }
+            if (e.subCategory && !map[e.category].includes(e.subCategory)) {
+                map[e.category].push(e.subCategory);
+            }
+        });
+        // Sort sub-categories for each category
+        Object.keys(map).forEach(cat => {
+            map[cat].sort();
+        });
+        return map;
+    })(),
+}
   };
 }, [expenses, filters, drillDownDateFilter, selectedCategoryForDrill, selectedSubCategoryForDrill]);
 
@@ -1148,7 +1163,7 @@ const {
       valueChange: value - previousMonthValue,
     };
   });
-  past3MonthsData.reverse(); // Show newest to oldest (Sep, Aug, Jul)
+  past3MonthsData; // Show newest to oldest (Sep, Aug, Jul)
 
   const totalExpense = filteredExpensesForDisplay.reduce((s, e) => s + e.amount, 0);
   const currentMonthTotal = currentMonthExpenses.reduce((s, e) => s + e.amount, 0);
@@ -1183,9 +1198,9 @@ const movingAverages = useMemo(() => {
       const maValue = currentPeriodTotal / months;
 
       const priorPeriodValues = Array.from({ length: months }, (_, i) => {
-          const d = new Date(now.getFullYear(), now.getMonth() - (i + 1 + months), 1);
-          return monthlyMap[monthKey(d)] || 0;
-      });
+    const d = new Date(now.getFullYear(), now.getMonth() - months - (i + 1), 1);
+    return monthlyMap[monthKey(d)] || 0;
+});
       const priorPeriodTotal = priorPeriodValues.reduce((s, v) => s + v, 0);
 
       let percentageChange = 0;
@@ -1390,23 +1405,28 @@ return (
                           : 0;
 
                         return (
-                          <View key={index} style={styles.expenseRow}>
+                          <TouchableOpacity 
+                              key={index} 
+                              style={styles.expenseRow}
+                              onPress={() => handleQuarterlyDrillDown(quarter)}
+                              activeOpacity={0.7}
+                            >
                             <Text style={styles.expenseLabel}>{quarter.label}</Text>
                             <View style={styles.expenseValueContainer}>
                               <Text style={styles.expenseValue}>{`₹${quarter.value.toFixed(2)}`}</Text>
                               {quarter.valueChange > 0 ? (
                                 <View style={styles.indicatorContainer}>
-                                  <ArrowUp size={12} color="green" />
-                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                  <ArrowUp size={12} color="red" />
+                                  <Text style={styles.percentageText}>{`${Math.abs(percentageChange).toFixed(0)}%`}</Text>
                                 </View>
                               ) : (
                                 <View style={styles.indicatorContainer}>
-                                  <ArrowDown size={12} color="red" />
-                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                  <ArrowDown size={12} color="green" />
+                                  <Text style={styles.percentageText}>{`${Math.abs(percentageChange).toFixed(0)}%`}</Text>
                                 </View>
                               )}
                             </View>
-                          </View>
+                          </TouchableOpacity>
                         );
                       })}
                     </View>
@@ -1421,23 +1441,28 @@ return (
                           : 0;
 
                         return (
-                          <View key={index} style={styles.expenseRow}>
+                          <TouchableOpacity 
+                                key={index} 
+                                style={styles.expenseRow}
+                                onPress={() => handleMonthDrillDown(month)}
+                                activeOpacity={0.7}
+                              >
                             <Text style={styles.expenseLabel}>{month.label}</Text>
                             <View style={styles.expenseValueContainer}>
                               <Text style={styles.expenseValue}>{`₹${month.value.toFixed(2)}`}</Text>
                               {month.valueChange > 0 ? (
                                 <View style={styles.indicatorContainer}>
-                                  <ArrowUp size={12} color="green" />
-                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                  <ArrowUp size={12} color="red" />
+                                  <Text style={styles.percentageText}>{`${Math.abs(percentageChange).toFixed(0)}%`}</Text>
                                 </View>
                               ) : (
                                 <View style={styles.indicatorContainer}>
-                                  <ArrowDown size={12} color="red" />
-                                  <Text style={styles.percentageText}>{`${percentageChange.toFixed(1)}%`}</Text>
+                                  <ArrowDown size={12} color="green" />
+                                  <Text style={styles.percentageText}>{`${Math.abs(percentageChange).toFixed(0)}%`}</Text>
                                 </View>
                               )}
                             </View>
-                          </View>
+                          </TouchableOpacity>
                         );
                       })}
                     </View>
