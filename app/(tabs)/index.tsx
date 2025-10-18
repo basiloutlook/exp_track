@@ -19,6 +19,8 @@ import DatePicker from '@/components/DatePicker';
 import Dropdown from '@/components/Dropdown';
 import LabelSelector from '@/components/LabelSelector';
 import { alertEngine } from '@/utils/alertEngine';
+import { enqueueSync, initAutoSync  } from '@/utils/syncService';
+
 import {
   addExpenseToGoogleSheet,
   updateExpenseInGoogleSheet,
@@ -87,6 +89,11 @@ export default function AddExpense() {
     );
   }, [email, date, category, subCategory, item, shopName, amount, paymentMode, labels, originalExpense]);
 
+    // ✅ Auto-sync retry initialization
+  useEffect(() => {
+    initAutoSync();
+  }, []);
+
   // ✅ Handle screen focus
   useFocusEffect(
     useCallback(() => {
@@ -136,7 +143,7 @@ export default function AddExpense() {
         style: 'destructive',
         onPress: () => {
           resetForm();
-          router.replace('/(tabs)/dashboard');
+          Alert.alert('Success', isEditMode ? 'Expense updated successfully!' : 'Expense added successfully!');
         },
       },
     ]);
@@ -144,86 +151,51 @@ export default function AddExpense() {
 
   // ✅ Add or update expense
   const handleSubmit = async () => {
-  if (
-    !email.trim() ||
-    !category ||
-    !subCategory ||
-    !item.trim() ||
-    !amount.trim() ||
-    isNaN(Number(amount)) ||
-    !paymentMode
-  ) {
-    Alert.alert('Error', 'Please fill all required fields');
-    return;
-  }
-
-  if (isEditMode && !hasChanges()) {
-    Alert.alert('No Changes', 'No changes were made to this transaction.');
+  if (!email.trim() || !category || !subCategory || !item.trim() || !amount.trim() || !paymentMode) {
+    Alert.alert('Error', 'Please fill all required fields.');
     return;
   }
 
   setIsSubmitting(true);
+  await storageService.saveUserEmail(email);
 
-  try {
-    await storageService.saveUserEmail(email);
+  const formattedDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString().split('T')[0];
 
-    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-      .toISOString()
-      .split('T')[0];
+  const expData: Expense = {
+    id: expenseId || Date.now().toString(),
+    timestamp: new Date().toISOString(),
+    email,
+    date: formattedDate,
+    category,
+    subCategory,
+    item,
+    shopName,
+    amount: Number(amount),
+    paymentMode,
+    labels,
+  };
 
-    const expenseData: Omit<Expense, 'id' | 'timestamp'> = {
-      email: email.trim(),
-      date: localDate,
-      category,
-      subCategory,
-      item: item.trim(),
-      shopName: shopName.trim(),
-      amount: Number(amount),
-      paymentMode,
-      labels,
-    };
-
-    if (expenseId) {
-      // ✅ Update existing expense
-      const updatedExpense: Expense = {
-        ...expenseData,
-        id: expenseId,
-        timestamp: originalExpense?.timestamp || new Date().toISOString(),
-      };
-
-      await updateExpenseInGoogleSheet(updatedExpense);
-      await storageService.updateExpenseOnly(updatedExpense);
-
-      // ✅ ADD THIS: Trigger notification check after update
-      const allExpenses = await storageService.getExpenses();
-      await alertEngine.triggerImmediateNotification(allExpenses || [], updatedExpense);
-
-      Alert.alert('Success', 'Transaction updated successfully!');
-      resetForm();
-    } else {
-      // ✅ Add new expense
-      const newExpense: Expense = {
-        ...expenseData,
-        id: Date.now().toString(),
-        timestamp: new Date().toISOString(),
-      };
-
-      await addExpenseToGoogleSheet(newExpense);
-      await storageService.addExpenseOnly(newExpense);
-
-      // ✅ ADD THIS: Trigger notification check after adding
-      const allExpenses = await storageService.getExpenses();
-      await alertEngine.triggerImmediateNotification(allExpenses || [], newExpense);
-
-      Alert.alert('Success', 'Expense added successfully!');
-      resetForm();
-    }
-  } catch (error) {
-    console.error('❌ Error saving expense:', error);
-    Alert.alert('Error', `Failed to ${expenseId ? 'update' : 'save'} expense.`);
-  } finally {
-    setIsSubmitting(false);
+  // ✅ 1. Optimistic Local Save (instant feedback)
+  if (expenseId) {
+    await storageService.updateExpenseOnly(expData);
+    Alert.alert('Success', 'Expense updated (syncing in background...)');
+    enqueueSync({ action: 'update', ...expData });
+ // background sync
+  } else {
+    await storageService.addExpenseOnly(expData);
+    Alert.alert('Success', 'Expense added (syncing in background...)');
+    enqueueSync({ action: 'add', ...expData }); // background sync
   }
+
+  // ✅ 2. Optional: trigger alerts if you use alertEngine
+  const all = await storageService.getExpenses();
+  await alertEngine.triggerImmediateNotification(all || [], expData);
+
+  // ✅ 3. Cleanup and navigate back
+  resetForm();
+  setIsSubmitting(false);
+  Alert.alert('Success', isEditMode ? 'Expense updated successfully!' : 'Expense added successfully!');
 };
 
   return (
@@ -410,7 +382,20 @@ const styles = StyleSheet.create({
 
 // ✅ Delete Expense function (optional)
 const GOOGLE_SHEET_URL =
-  'https://script.google.com/macros/s/AKfycbw_b9Sua0rVLKnEksLZ69XcZ6WzstiW8LVKElUSx8WKSUYZGfmvt-VIp1Gz6wLrWyEo/exec';
+  'https://script.google.com/macros/s/AKfycbwXdK1Bh9DrFsOKdMlOpQZEWTQ7AONBhtuneRXY-S8ooD8Uem44eLObwgRl2loLaYMk/exec';
+
+// ✅ Add this helper function after imports or constants
+const sendToGoogle = async (payload: any) => {
+  try {
+    await fetch(GOOGLE_SHEET_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    console.warn('Background sync failed:', err);
+  }
+};
 
 export async function deleteExpenseFromGoogleSheetLocal(id: string): Promise<void> {
   try {

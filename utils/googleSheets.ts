@@ -3,7 +3,7 @@ import { Expense } from "@/types/expense";
 import { storageService } from "./storage";
 
 const GOOGLE_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbw_b9Sua0rVLKnEksLZ69XcZ6WzstiW8LVKElUSx8WKSUYZGfmvt-VIp1Gz6wLrWyEo/exec";
+  "https://script.google.com/macros/s/AKfycbwXdK1Bh9DrFsOKdMlOpQZEWTQ7AONBhtuneRXY-S8ooD8Uem44eLObwgRl2loLaYMk/exec";
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.

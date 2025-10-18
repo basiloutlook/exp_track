@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -13,13 +13,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
-import { updateExpenseInGoogleSheet } from '@/utils/googleSheets';
+import SyncToast from '@/components/SyncToast';
 import { alertEngine } from '@/utils/alertEngine';
 import { Expense } from '@/types/expense';
 import DatePicker from '@/components/DatePicker';
 import Dropdown from '@/components/Dropdown';
 import LabelSelector from '@/components/LabelSelector';
 import { CATEGORIES, CATEGORY_MAP } from '@/constants/categories';
+import { enqueueSync, initAutoSync  } from '@/utils/syncService';
 
 export default function UpdateExpense() {
   const params = useLocalSearchParams<{ expense?: string }>();
@@ -72,6 +73,11 @@ export default function UpdateExpense() {
       JSON.stringify(labels.sort()) !== JSON.stringify((originalExpense.labels || []).sort())
     );
   }, [email, date, category, subCategory, item, shopName, amount, paymentMode, labels, originalExpense]);
+
+    // ✅ Initialize background sync when page mounts
+  useEffect(() => {
+    initAutoSync();
+  }, []);
 
   // ✅ FIXED useFocusEffect (no dependency on hasChanges or states)
   useFocusEffect(
@@ -162,7 +168,9 @@ export default function UpdateExpense() {
       timestamp: originalExpense?.timestamp || new Date().toISOString(),
     };
 
-    await updateExpenseInGoogleSheet(updatedExpense);
+    // ✅ Background sync (non-blocking)
+    enqueueSync({ action: 'update', ...updatedExpense });
+    
 
     // ✅ ADD THIS: Trigger notification check after update
     const allExpenses = await storageService.getExpenses();
@@ -299,6 +307,7 @@ export default function UpdateExpense() {
           </TouchableOpacity>
         </ScrollView>
       </View>
+       <SyncToast />
     </SafeAreaView>
   );
 }
