@@ -496,6 +496,7 @@ const defaultFilters = {
     category: null as string | null,
     subCategory: null as string | null,
     labels: [] as string[],
+    email: null as string | null,
     startDate: getDefaultStartDate(),
     endDate: new Date(),
 };
@@ -638,6 +639,7 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
           category: src.category ?? null,
           subCategory: src.subCategory ?? null,
           labels: Array.isArray(src.labels) ? [...src.labels] : [],
+          email: src.email ?? null,
           startDate: src.startDate instanceof Date ? new Date(src.startDate) : new Date(defaultFilters.startDate),
           endDate: src.endDate instanceof Date ? new Date(src.endDate) : new Date(defaultFilters.endDate),
         };
@@ -667,6 +669,7 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
             category: null,
             subCategory: null,
             labels: [] as string[],
+            email: null,
             startDate: new Date(defaultFilters.startDate),
             endDate: new Date(defaultFilters.endDate),
         };
@@ -746,6 +749,19 @@ const FilterSidebar = ({ visible, onClose, onApply, initialFilters, options }: a
                         <Text style={styles.filterOptionText}>{l}</Text>
                     </TouchableOpacity>
                 )}
+<Text style={styles.filterSectionTitle}>Email</Text>
+{(options?.emails || []).map((e: string) => (
+  <TouchableOpacity
+    key={e}
+    onPress={() => setLocalFilters((prev: any) => ({
+      ...prev,
+      email: prev.email === e ? null : e,
+    }))}
+    style={[styles.filterOption, localFilters.email === e && styles.filterOptionSelected]}
+  >
+    <Text style={styles.filterOptionText}>{e}</Text>
+  </TouchableOpacity>
+))}
 
                 <Text style={styles.filterSectionTitle}>Category</Text>
 {(options?.categories || []).map((c: string) => (
@@ -993,21 +1009,25 @@ const {
   const categories = new Set<string>();
   const subCategories = new Set<string>();
   const labels = new Set<string>();
+  const emails = new Set<string>();
   expenses.forEach(e => {
     categories.add(e.category);
     if(e.subCategory) subCategories.add(e.subCategory);
     e.labels?.forEach(l => labels.add(l));
+    if (e.email) emails.add(e.email);
   });
 
   const now = new Date();
 
   // Step 1: Apply only category/subcategory/label filters from sidebar (NOT date)
   const categoryLabelFiltered = expenses.filter(e => {
-      if (filters.category && e.category !== filters.category) return false;
-      if (filters.subCategory && e.subCategory !== filters.subCategory) return false;
-      if (filters.labels.length > 0 && !filters.labels.every((l: string) => (e.labels || []).includes(l))) return false;
-      return true;
-  });
+  if (filters.category && e.category !== filters.category) return false;
+  if (filters.subCategory && e.subCategory !== filters.subCategory) return false;
+  if (filters.labels.length > 0 && !filters.labels.every((l: string) => (e.labels || []).includes(l))) return false;
+  if (filters.email && e.email !== filters.email) return false; // ✅ add this
+  return true;
+});
+
 
   // Step 2: Apply CATEGORY drill-downs (for charts and current month)
   let categoryDrillFiltered = categoryLabelFiltered;
@@ -1045,6 +1065,10 @@ const {
       fullDrillDownFiltered = fullDrillDownFiltered.filter(e => e.subCategory === selectedSubCategoryForDrill);
   }
 
+  if (filters.email) {
+  fullDrillDownFiltered = fullDrillDownFiltered.filter(e => e.email === filters.email);
+  categoryDrillFiltered = categoryDrillFiltered.filter(e => e.email === filters.email);
+}
   // Step 4: For display list only - apply sidebar date filter
   const dateFiltered = fullDrillDownFiltered.filter(e => {
       const expenseDate = new Date(e.date);
@@ -1070,6 +1094,7 @@ const {
     categories: Array.from(categories).sort(),
     subCategories: Array.from(subCategories).sort(),
     labels: Array.from(labels).sort(),
+    emails: Array.from(emails).sort(),
     categoryMap: (() => {
         const map: { [key: string]: string[] } = {};
         expenses.forEach(e => {
@@ -1305,6 +1330,9 @@ const getMainFilterDetail = () => {
 
   if (filters.labels.length > 0) {
       detail += `Labels: ${filters.labels.join(', ')} | `;
+  }
+  if (filters.email) {
+    detail += `Email: ${filters.email} | `;
   }
 
   const startDateStr = filters.startDate.toLocaleDateString();

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { CATEGORY_STRUCTURE  } from "../types/expense";
 import { useRouter } from "expo-router";
 import { X } from "lucide-react-native";
 import {
@@ -16,6 +17,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AlertSettings, AlertType, CategoryBudget } from "@/types/alert";
 import { alertStorage } from "@/utils/alertStorage";
 import { Colors } from "@/constants/Colors";
+import RNPickerSelect from "react-native-picker-select";
+
 
 export default function SettingsScreen() {
   const [settings, setSettings] = useState<AlertSettings | null>(null);
@@ -26,7 +29,8 @@ export default function SettingsScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCategory, setNewCategory] = useState("");
   const [newBudget, setNewBudget] = useState("");
-
+  const categories = Object.keys(CATEGORY_STRUCTURE);
+  
   useEffect(() => {
     loadSettings();
   }, []);
@@ -307,64 +311,71 @@ export default function SettingsScreen() {
 
       {/* Add Category Modal */}
       <Modal
-        visible={showAddModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAddModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Category Budget</Text>
-              <TouchableOpacity onPress={() => setShowAddModal(false)}>
-                <X size={20} color={Colors.text.primary} />
-              </TouchableOpacity>
-            </View>
+  visible={showAddModal}
+  transparent
+  animationType="slide"
+  onRequestClose={() => setShowAddModal(false)}
+>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContainer}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>Add Category Budget</Text>
+        <TouchableOpacity onPress={() => setShowAddModal(false)}>
+          <X size={20} color={Colors.text.primary} />
+        </TouchableOpacity>
+      </View>
 
-            <View style={styles.modalContent}>
-              <View style={styles.modalInputGroup}>
-                <Text style={styles.modalInputLabel}>Category Name</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="e.g., Food, Transport, Entertainment"
-                  value={newCategory}
-                  onChangeText={setNewCategory}
-                  placeholderTextColor={Colors.gray[400]}
-                  autoCapitalize="words"
-                />
-              </View>
-
-              <View style={styles.modalInputGroup}>
-                <Text style={styles.modalInputLabel}>Monthly Limit (₹)</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="e.g., 5000"
-                  keyboardType="numeric"
-                  value={newBudget}
-                  onChangeText={setNewBudget}
-                  placeholderTextColor={Colors.gray[400]}
-                />
-              </View>
-            </View>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                onPress={() => setShowAddModal(false)}
-                style={[styles.modalButton, styles.modalButtonCancel]}
-              >
-                <Text style={styles.modalButtonTextCancel}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={saveNewCategoryBudget}
-                style={[styles.modalButton, styles.modalButtonSave]}
-              >
-                <Text style={styles.modalButtonText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+      <View style={styles.modalContent}>
+        {/* ✅ Dropdown for Category Selection */}
+        <View style={styles.modalInputGroup}>
+          <Text style={styles.modalInputLabel}>Category Name</Text>
+          <RNPickerSelect
+            onValueChange={(value: string) => setNewCategory(value)}
+            items={Object.keys(CATEGORY_STRUCTURE).map((cat: string) => ({
+              label: cat,
+              value: cat,
+            }))}
+            placeholder={{ label: "Select a category...", value: null }}
+            value={newCategory}
+            style={{
+              inputIOS: styles.modalInput,
+              inputAndroid: styles.modalInput,
+            }}
+          />
         </View>
-      </Modal>
+
+        <View style={styles.modalInputGroup}>
+          <Text style={styles.modalInputLabel}>Monthly Limit (₹)</Text>
+          <TextInput
+            style={styles.modalInput}
+            placeholder="e.g., 5000"
+            keyboardType="numeric"
+            value={newBudget}
+            onChangeText={setNewBudget}
+            placeholderTextColor={Colors.gray[400]}
+          />
+        </View>
+      </View>
+
+      <View style={styles.modalActions}>
+        <TouchableOpacity
+          onPress={() => setShowAddModal(false)}
+          style={[styles.modalButton, styles.modalButtonCancel]}
+        >
+          <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={saveNewCategoryBudget}
+          style={[styles.modalButton, styles.modalButtonSave]}
+        >
+          <Text style={styles.modalButtonText}>Save</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </View>
+</Modal>
+
     </SafeAreaView>
   );
 }
@@ -573,14 +584,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   modalInput: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: Colors.text.primary,
-    backgroundColor: Colors.background,
-  },
+  borderWidth: 1,
+  borderColor: Colors.border,
+  borderRadius: 8,
+  padding: 12,
+  fontSize: 16,
+  color: Colors.text.primary,
+  backgroundColor: Colors.background,
+},
   modalActions: { 
     flexDirection: "row", 
     padding: 16,
