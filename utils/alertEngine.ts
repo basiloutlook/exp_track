@@ -42,25 +42,29 @@ export const alertEngine = {
         );
 
         if (result.triggered && result.alert) {
-          const alert: Alert = {
-            id: `${alertType}-${Date.now()}`,
-            type: alertType,
-            severity: result.alert.severity || AlertSeverity.INFO,
-            title: result.alert.title || "Alert",
-            message: result.alert.message || "",
-            data: result.alert.data,
-            timestamp: Date.now(),
-            priority: result.alert.priority || 5,
-            read: false,
-            dismissed: false,
-          };
+  const alert: Alert = {
+    id: `${alertType}-${Date.now()}`,
+    type: alertType,
+    severity: result.alert.severity || AlertSeverity.INFO,
+    title: result.alert.title || "Alert",
+    message: result.alert.message || "",
+    data: result.alert.data,
+    timestamp: Date.now(),
+    priority: result.alert.priority || 5,
+    read: false,
+    dismissed: false,
+  };
 
-          triggeredAlerts.push(alert);
-          
-          // Add to history
-          await alertStorage.addToHistory(alertType, true);
-        }
-      }
+  triggeredAlerts.push(alert);
+  
+  // Add to notification bell
+  const notificationMsg = this.alertToNotification(alert);
+  await alertStorage.addNotification(notificationMsg);
+  
+  // Add to history
+  await alertStorage.addToHistory(alertType, true);
+}      
+}
 
       // Sort by priority (highest first)
       triggeredAlerts.sort((a, b) => b.priority - a.priority);
@@ -466,107 +470,129 @@ export const alertEngine = {
    * Trigger notification for immediate alert
    * Called after transaction is added
    */
-  async triggerImmediateNotification(
-    expenses: Expense[],
-    newTransaction: Expense
-  ): Promise<void> {
-    try {
-      const settings = await alertStorage.getSettings();
-      
-      // Check daily budget
-      if (settings.dailyBudget && settings.enabledAlerts.includes(AlertType.DAILY_BUDGET)) {
-        const today = new Date().toISOString().split("T")[0];
-        const todayExpenses = expenses.filter((e) => e.date === today);
-        const totalToday = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
-        const percentUsed = (totalToday / settings.dailyBudget) * 100;
+  /**
+ * Trigger notification for immediate alert
+ * Called after transaction is added
+ */
+async triggerImmediateNotification(
+  expenses: Expense[],
+  newTransaction: Expense
+): Promise<void> {
+  try {
+    const settings = await alertStorage.getSettings();
+    
+    // Check daily budget
+    if (settings.dailyBudget && settings.enabledAlerts.includes(AlertType.DAILY_BUDGET)) {
+      const today = new Date().toISOString().split("T")[0];
+      const todayExpenses = expenses.filter((e) => e.date === today);
+      const totalToday = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const percentUsed = (totalToday / settings.dailyBudget) * 100;
 
-        if (percentUsed >= 90) {
-          const message = 
-            percentUsed >= 100
-              ? `🚨 Daily budget exceeded! Spent ₹${totalToday.toFixed(0)} of ₹${settings.dailyBudget}`
-              : `⚠️ You've used ${percentUsed.toFixed(0)}% of your daily budget (₹${totalToday.toFixed(0)}/₹${settings.dailyBudget})`;
-          
-          await alertStorage.addNotification(message);
-        }
-      }
-
-      // Check weekly budget
-      if (settings.weeklyBudget && settings.enabledAlerts.includes(AlertType.WEEKLY_BUDGET)) {
-        const weekExpenses = this.getExpensesInRange(expenses, 7);
-        const totalWeek = weekExpenses.reduce((sum, e) => sum + e.amount, 0);
-        const percentUsed = (totalWeek / settings.weeklyBudget) * 100;
-
-        if (percentUsed >= 80) {
-          const message = 
-            percentUsed >= 100
-              ? `🚨 Weekly budget exceeded! Spent ₹${totalWeek.toFixed(0)} of ₹${settings.weeklyBudget}`
-              : `⚠️ ${percentUsed.toFixed(0)}% of weekly budget used (₹${totalWeek.toFixed(0)}/₹${settings.weeklyBudget})`;
-          
-          await alertStorage.addNotification(message);
-        }
-      }
-
-      // Check monthly budget
-      if (settings.monthlyBudget && settings.enabledAlerts.includes(AlertType.MONTHLY_BUDGET)) {
-        const monthExpenses = this.getExpensesInRange(expenses, 30);
-        const totalMonth = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
-        const percentUsed = (totalMonth / settings.monthlyBudget) * 100;
-
-        if (percentUsed >= 80) {
-          const message = 
-            percentUsed >= 100
-              ? `🚨 Monthly budget exceeded! Spent ₹${totalMonth.toFixed(0)} of ₹${settings.monthlyBudget}`
-              : `⚠️ ${percentUsed.toFixed(0)}% of monthly budget used (₹${totalMonth.toFixed(0)}/₹${settings.monthlyBudget})`;
-          
-          await alertStorage.addNotification(message);
-        }
-      }
-
-      // Check category budgets
-      if (settings.enabledAlerts.includes(AlertType.CATEGORY_BUDGET)) {
-        const categoryBudget = settings.categoryBudgets.find(
-          (cb) => cb.enabled && cb.category === newTransaction.category
-        );
-
-        if (categoryBudget) {
-          const monthExpenses = this.getExpensesInRange(expenses, 30);
-          const categoryExpenses = monthExpenses.filter(
-            (e) => e.category === categoryBudget.category
-          );
-          const totalSpent = categoryExpenses.reduce((sum, e) => sum + e.amount, 0);
-          const percentUsed = (totalSpent / categoryBudget.monthlyLimit) * 100;
-
-          if (percentUsed >= 80) {
-            const message = 
-              percentUsed >= 100
-                ? `🚨 ${categoryBudget.category} budget exceeded! Spent ₹${totalSpent.toFixed(0)} of ₹${categoryBudget.monthlyLimit}`
-                : `⚠️ ${categoryBudget.category}: ${percentUsed.toFixed(0)}% of budget used (₹${totalSpent.toFixed(0)}/₹${categoryBudget.monthlyLimit})`;
-            
-            await alertStorage.addNotification(message);
-          }
-        }
-      }
-
-      // Check unusual spending
-      if (settings.enabledAlerts.includes(AlertType.UNUSUAL_SPENDING)) {
-        const todayExpenses = this.getExpensesInRange(expenses, 1);
-        const totalToday = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
+      if (percentUsed >= 90) {
+        const title = percentUsed >= 100 ? "Daily Budget Exceeded!" : "Daily Budget Warning";
+        const message = 
+          percentUsed >= 100
+            ? `Spent ₹${totalToday.toFixed(0)} of ₹${settings.dailyBudget} daily budget`
+            : `${percentUsed.toFixed(0)}% of daily budget used (₹${totalToday.toFixed(0)}/₹${settings.dailyBudget})`;
         
-        if (totalToday > 0) {
-          const last30Days = this.getExpensesInRange(expenses, 30);
-          const avgDaily = last30Days.reduce((sum, e) => sum + e.amount, 0) / 30;
-          const multiplier = settings.unusualSpendingMultiplier || 2;
+        const emoji = percentUsed >= 100 ? '🚨' : '⚠️';
+        await alertStorage.addNotification(`${emoji} ${title}: ${message}`);
+      }
+    }
 
-          if (totalToday > avgDaily * multiplier) {
-            const message = `⚠️ Unusual spending detected! Today's spending (₹${totalToday.toFixed(0)}) is ${multiplier}x higher than your daily average`;
-            await alertStorage.addNotification(message);
-          }
+    // Check weekly budget
+    if (settings.weeklyBudget && settings.enabledAlerts.includes(AlertType.WEEKLY_BUDGET)) {
+      const weekExpenses = this.getExpensesInRange(expenses, 7);
+      const totalWeek = weekExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const percentUsed = (totalWeek / settings.weeklyBudget) * 100;
+
+      if (percentUsed >= 80) {
+        const title = percentUsed >= 100 ? "Weekly Budget Exceeded!" : "Weekly Budget Warning";
+        const message = 
+          percentUsed >= 100
+            ? `Spent ₹${totalWeek.toFixed(0)} of ₹${settings.weeklyBudget} weekly budget`
+            : `${percentUsed.toFixed(0)}% of weekly budget used (₹${totalWeek.toFixed(0)}/₹${settings.weeklyBudget})`;
+        
+        const emoji = percentUsed >= 100 ? '🚨' : '⚠️';
+        await alertStorage.addNotification(`${emoji} ${title}: ${message}`);
+      }
+    }
+
+    // Check monthly budget
+    if (settings.monthlyBudget && settings.enabledAlerts.includes(AlertType.MONTHLY_BUDGET)) {
+      const monthExpenses = this.getExpensesInRange(expenses, 30);
+      const totalMonth = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const percentUsed = (totalMonth / settings.monthlyBudget) * 100;
+
+      if (percentUsed >= 80) {
+        const title = percentUsed >= 100 ? "Monthly Budget Exceeded!" : "Monthly Budget Warning";
+        const message = 
+          percentUsed >= 100
+            ? `Spent ₹${totalMonth.toFixed(0)} of ₹${settings.monthlyBudget} monthly budget`
+            : `${percentUsed.toFixed(0)}% of monthly budget used (₹${totalMonth.toFixed(0)}/₹${settings.monthlyBudget})`;
+        
+        const emoji = percentUsed >= 100 ? '🚨' : '⚠️';
+        await alertStorage.addNotification(`${emoji} ${title}: ${message}`);
+      }
+    }
+
+    // Check category budgets
+    if (settings.enabledAlerts.includes(AlertType.CATEGORY_BUDGET)) {
+      const categoryBudget = settings.categoryBudgets.find(
+        (cb) => cb.enabled && cb.category === newTransaction.category
+      );
+
+      if (categoryBudget) {
+        const monthExpenses = this.getExpensesInRange(expenses, 30);
+        const categoryExpenses = monthExpenses.filter(
+          (e) => e.category === categoryBudget.category
+        );
+        const totalSpent = categoryExpenses.reduce((sum, e) => sum + e.amount, 0);
+        const percentUsed = (totalSpent / categoryBudget.monthlyLimit) * 100;
+
+        if (percentUsed >= 80) {
+          const title = percentUsed >= 100 
+            ? `${categoryBudget.category} Budget Exceeded!` 
+            : `${categoryBudget.category} Budget Warning`;
+          const message = 
+            percentUsed >= 100
+              ? `Spent ₹${totalSpent.toFixed(0)} of ₹${categoryBudget.monthlyLimit}`
+              : `${percentUsed.toFixed(0)}% used (₹${totalSpent.toFixed(0)}/₹${categoryBudget.monthlyLimit})`;
+          
+          const emoji = percentUsed >= 100 ? '🚨' : '⚠️';
+          await alertStorage.addNotification(`${emoji} ${title}: ${message}`);
         }
       }
-
-      console.log("✅ Immediate notification check complete");
-    } catch (error) {
-      console.error("❌ Error triggering immediate notification:", error);
     }
-  },
+
+    // Check unusual spending
+    if (settings.enabledAlerts.includes(AlertType.UNUSUAL_SPENDING)) {
+      const todayExpenses = this.getExpensesInRange(expenses, 1);
+      const totalToday = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
+      
+      if (totalToday > 0) {
+        const last30Days = this.getExpensesInRange(expenses, 30);
+        const avgDaily = last30Days.reduce((sum, e) => sum + e.amount, 0) / 30;
+        const multiplier = settings.unusualSpendingMultiplier || 2;
+
+        if (totalToday > avgDaily * multiplier) {
+          const message = `Unusual spending detected! Today's spending (₹${totalToday.toFixed(0)}) is ${multiplier}x higher than daily average`;
+          await alertStorage.addNotification(`⚠️ ${message}`);
+        }
+      }
+    }
+
+    console.log("✅ Immediate notification check complete");
+  } catch (error) {
+    console.error("❌ Error triggering immediate notification:", error);
+  }
+},
+  /**
+ * Convert Alert to notification message
+ */
+alertToNotification(alert: Alert): string {
+  const emoji = alert.severity === AlertSeverity.CRITICAL ? '🚨' : 
+                alert.severity === AlertSeverity.WARNING ? '⚠️' : 'ℹ️';
+  return `${emoji} ${alert.title}: ${alert.message}`;
+},
 };

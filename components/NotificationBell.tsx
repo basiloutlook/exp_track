@@ -17,6 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const STORAGE_KEY = "@notification_history";
 const MAX_NOTIFICATIONS = 10;
+const [loading, setLoading] = useState(false); 
 
 interface NotificationItem {
   id: string;
@@ -57,16 +58,18 @@ export default function NotificationBell({ size = 24, onRefresh }: NotificationB
   }, [showPopup]);
 
   const loadNotifications = async () => {
-    try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setNotifications(parsed);
-      }
-    } catch (error) {
-      console.error("Error loading notifications:", error);
+  try {
+    const stored = await AsyncStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      setNotifications(parsed);
     }
-  };
+  } catch (error) {
+    console.error("Error loading notifications:", error);
+  } finally {
+    setLoading(false);  // Add this if not present
+  }
+};  
 
   const saveNotifications = async (notifs: NotificationItem[]) => {
     try {
@@ -107,24 +110,18 @@ export default function NotificationBell({ size = 24, onRefresh }: NotificationB
   };
 
   const formatDate = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
 
-    if (minutes < 1) return "Just now";
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-
-    return date.toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "short",
-      year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-    });
-  };
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+};
 
   const formatFullDate = (timestamp: string) => {
     const date = new Date(timestamp);
