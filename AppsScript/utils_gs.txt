@@ -1,0 +1,60 @@
+/********************************************************
+ * utils.gs
+ * - general helpers used across modules
+ * - reading expenses, basic parsing
+ ********************************************************/
+
+/**
+ * getExpensesData()
+ * - Reads Form Responses 1 and returns an array of expense objects:
+ *   { timestamp, date (yyyy-MM-dd), category, subCategory, item, amount, email, shopName, paymentMode, labels, id }
+ */
+function getExpensesData() {
+  const sheet = getSheet(SHEETS.EXPENSES);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 11).getValues();
+  return data.map(row => ({
+    timestamp: row[0],
+    date: Utilities.formatDate(new Date(row[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+    category: row[2] || '',
+    subCategory: row[3] || '',
+    item: row[4] || '',
+    amount: Number(row[5]) || 0,
+    email: row[6] || '',
+    shopName: row[7] || '',
+    paymentMode: row[8] || '',
+    labels: row[9] || '',
+    id: row[10] || ''
+  }));
+}
+
+/* Sheet accessors */
+function getSheet(name) {
+  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+}
+function getOrCreateSheet(name, headers) {
+  let sheet = getSheet(name);
+  if (!sheet) {
+    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet(name);
+    if (headers && headers.length) sheet.appendRow(headers);
+  }
+  return sheet;
+}
+
+/* calculateNextCheck - same logic as earlier script */
+function calculateNextCheck(period, from) {
+  const next = new Date(from);
+  if (period === 'Instant') return from;
+  if (period === 'Every_4h') next.setHours(next.getHours() + 4);
+  if (period === 'Every_8h') next.setHours(next.getHours() + 8);
+  if (period === 'Every_12h') next.setHours(next.getHours() + 12);
+  if (period === 'Daily') next.setDate(next.getDate() + 1);
+  if (period === 'Weekly') next.setDate(next.getDate() + 7);
+  if (period === 'Monthly') next.setMonth(next.getMonth() + 1);
+  return next;
+}
+
+/* Convenience wrapper used by main.oneTimeSetup */
+function ensureSheetsExistAndHeadersWrapper() {
+  ensureSheetsExistAndHeaders();
+}

@@ -1,0 +1,135 @@
+/********************************************************
+ * notifications.gs
+ * - createNotification: writes to Notification_History
+ * - formatNotificationMessage: human-friendly & emoji
+ * - postToWebhook: optional webhook to app
+ * - getNotifications / mark read / dismiss
+ ********************************************************/
+
+/**
+ * createNotification(metricName, currentValue, threshold, severity, message)
+ * - Inserts notification into Notification_History and trims old entries
+ * - Posts to webhook if AlertWebhookURL present
+ */
+function createNotification(metricName, currentValue, threshold, severity, message) {
+  const sheet = getOrCreateSheet(SHEETS.NOTIFICATIONS, getNotificationHeaders());
+  const id = `notif_${Date.now()}`;
+  const msg = message || formatNotificationMessage(metricName, currentValue, threshold, severity);
+  const row = [
+    id,
+    metricName,
+    new Date(),
+    msg,
+    currentValue,
+    threshold,
+    severity,
+    false, // Read
+    false  // Dismissed
+  ];
+  sheet.appendRow(row);
+  trimNotifications(sheet);
+
+  // Post to webhook if configured
+  const settings = getUserSettings();
+  const webhook = settings.AlertWebhookURL || null;
+  if (webhook) {
+    try {
+      postToWebhook(webhook, { id, metricName, message: msg, timestamp: new Date().toISOString(), severity });
+    } catch (e) {
+      Logger.log('Webhook post failed: ' + e);
+    }
+  }
+  Logger.log('Notification created: ' + msg);
+}
+
+/**
+ * formatNotificationMessage - friendly formatting for known metric names
+ */
+function formatNotificationMessage(metricName, value, threshold, severity) {
+  const emoji = severity === 'CRITICAL' ? '🚨' : severity === 'WARNING' ? '⚠️' : 'ℹ️';
+  const formatted = (typeof value === 'number') ? `₹${Math.round(value)}` : (value || '');
+  const th = threshold ? ` of ₹${Math.round(threshold)}` : '';
+  if (metricName === 'Daily_Spending_Threshold') {
+    return `${emoji} Daily Spending Alert: Spent ${formatted}${th}`;
+  }
+  if (metricName.indexOf('Category_') === 0) {
+    const cat = metricName.replace('Category_', '');
+    return `${emoji} ${cat} Budget Alert: Spent ${formatted}${th}`;
+  }
+  if (metricName === 'Monthly_Comparison') {
+    return `${emoji} Monthly comparison: ${value}`;
+  }
+  return `${emoji} ${metricName}: ${formatted}${th}`;
+}
+
+/**
+ * postToWebhook(url, payload) - POST JSON to user's app webhook URL
+ */
+function postToWebhook(url, payload) {
+  if (!url) return;
+  try {
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true,
+      validateHttpsCertificates: true
+    };
+    const resp = UrlFetchApp.fetch(url, options);
+    Logger.log('Webhook posted, response code: ' + resp.getResponseCode());
+  } catch (err) {
+    Logger.log('postToWebhook error: ' + err);
+  }
+}
+
+/* Notification retrieval & management */
+
+function getNotifications(unreadOnly) {
+  const sheet = getSheet(SHEETS.NOTIFICATIONS);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+  const notifications = data.map(row => ({
+    id: row[0],
+    metricName: row[1],
+    timestamp: row[2],
+    message: row[3],
+    currentValue: row[4],
+    threshold: row[5],
+    severity: row[6],
+    read: !!row[7],
+    dismissed: !!row[8]
+  }));
+  return unreadOnly ? notifications.filter(n => !n.read && !n.dismissed) : notifications;
+}
+
+function markNotificationRead(id) {
+  return updateNotificationStatus(id, 8, true); // column 8 = Read (1-indexed in sheet)
+}
+
+function markNotificationDismissed(id) {
+  // mark both read and dismissed (col 8 = Read, 9 = Dismissed)
+  const sheet = getSheet(SHEETS.NOTIFICATIONS);
+  const finder = sheet.createTextFinder(id).matchEntireCell(true).findNext();
+  if (!finder) return { success: false, message: 'Notification not found' };
+  sheet.getRange(finder.getRow(), 8, 1, 2).setValues([[true, true]]);
+  return { success: true };
+}
+
+function updateNotificationStatus(id, col, value) {
+  const sheet = getSheet(SHEETS.NOTIFICATIONS);
+  const finder = sheet.createTextFinder(id).matchEntireCell(true).findNext();
+  if (!finder) return { success: false, message: 'Notification not found' };
+  sheet.getRange(finder.getRow(), col).setValue(value);
+  return { success: true };
+}
+
+/**
+ * trimNotifications(sheet) - keep only MAX_NOTIFICATIONS most recent
+ */
+function trimNotifications(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow > MAX_NOTIFICATIONS + 1) {
+    const toDelete = lastRow - MAX_NOTIFICATIONS - 1;
+    sheet.deleteRows(2, toDelete);
+  }
+}

@@ -1,0 +1,543 @@
+/********************************************************
+ * metricsEngine.gs
+ * - compute metrics (all periodic)
+ * - compute instant metrics (after add/update)
+ * - metric logic for all alerts described earlier
+ ********************************************************/
+
+/**
+ * calculateAllMetrics()
+ * - iterates metrics sheet rows and runs metric calculations based on the Metric Name
+ * - uses scheduling column (Period) to avoid unnecessary work
+ */
+function calculateAllMetrics() {
+  const now = new Date();
+  const metricsSheet = getOrCreateSheet(SHEETS.METRICS, getMetricsHeaders());
+  const data = metricsSheet.getDataRange().getValues();
+
+  // data[0] is headers
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const metricName = row[0];
+    const period = row[4];
+    const nextCheck = row[6];
+    // Skip if next check in future
+    if (nextCheck && new Date(nextCheck) > now) continue;
+    calculateMetric(metricName, i + 1);
+  }
+
+  return { success: true, message: 'All metrics calculated' };
+}
+
+/**
+ * calculateInstantMetrics()
+ * - run metrics which are marked 'Instant' in the metrics sheet (lightweight checks)
+ * - intended to run after an expense add/update
+ */
+function calculateInstantMetrics() {
+  const metricsSheet = getOrCreateSheet(SHEETS.METRICS, getMetricsHeaders());
+  const data = metricsSheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const metricName = data[i][0];
+    const period = data[i][4];
+    if (period === 'Instant') calculateMetric(metricName, i + 1);
+  }
+}
+
+/**
+ * calculateMetric(metricName, rowIndex)
+ * - main switch: compute currentValue, threshold, severity, shouldNotify
+ * - dedupe based on previous row values, and create notifications through createNotification()
+ */
+function calculateMetric(metricName, rowIndex) {
+  const expenses = getExpensesData(); // utils
+  const settings = getUserSettings(); // settings.gs
+  const now = new Date();
+
+  let currentValue = 0;
+  let threshold = null;
+  let thresholdSource = '';
+  let shouldNotify = false;
+  let severity = 'INFO';
+  let msg = '';
+
+  // --- Budget & Spending metrics ---
+  if (metricName === 'Daily_Spending_Threshold') {
+    // Daily spending vs 30-day moving average
+    currentValue = getDailyTotal(expenses);
+    const avg30 = get30DayAverage(expenses);
+    threshold = avg30 * 1.5; // 50% above avg triggers
+    thresholdSource = '30Day_Avg';
+    shouldNotify = avg30 > 0 ? currentValue > threshold : false;
+    severity = shouldNotify ? 'WARNING' : 'INFO';
+    msg = `You've spent ₹${Math.round(currentValue)} today, which is ${Math.round(((currentValue/avg30)-1)*100)}% more than your daily average (₹${Math.round(avg30)}).`;
+  }
+
+  else if (metricName === 'Weekly_Predictive') {
+    // Predictive weekly overspend based on pace
+    currentValue = getWeeklyTotal(expenses);
+    threshold = settings.Weekly_Budget || null;
+    thresholdSource = 'User_Defined';
+    const dayOfWeek = getDayOfWeekProgress(); // values days elapsed in week (1..7)
+    const predicted = dayOfWeek ? (currentValue / dayOfWeek) * 7 : currentValue;
+    const excess = threshold ? (predicted - threshold) : 0;
+    shouldNotify = threshold ? (predicted > threshold * 1.05) : false; // 5% buffer
+    severity = shouldNotify ? 'WARNING' : 'INFO';
+    msg = threshold ? `You're at ${Math.round((currentValue/threshold)*100)}% of weekly budget. At current pace, you'll ${predicted > threshold ? `exceed by ₹${Math.round(excess)}` : 'be within budget'}.` : '';
+  }
+
+  else if (metricName === 'Monthly_Total') {
+    currentValue = getMonthlyTotal(expenses);
+    threshold = settings.Monthly_Budget || null;
+    thresholdSource = 'User_Defined';
+    const pct = threshold ? (currentValue/threshold)*100 : 0;
+    ({ severity, shouldNotify } = checkBudgetThresholdGeneric(pct));
+    msg = threshold ? (shouldNotify ? `Monthly budget alert: spent ₹${Math.round(currentValue)} of ₹${Math.round(threshold)}` : `Monthly spend ₹${Math.round(currentValue)} (${Math.round(pct)}% of budget)`) : `Monthly spend ₹${Math.round(currentValue)}`;
+  }
+
+  // Category budgets: metric names like "Category_Food" created at initialize
+  else if (metricName.indexOf('Category_') === 0) {
+    const category = metricName.replace('Category_', '');
+    currentValue = getCategoryTotal(expenses, category);
+    threshold = settings[`${category}_Budget`] || null;
+    thresholdSource = 'User_Defined';
+    const pct = threshold ? (currentValue/threshold)*100 : 0;
+    ({ severity, shouldNotify } = checkBudgetThresholdGeneric(pct));
+    msg = threshold ? (shouldNotify ? `${category} budget exceeded: ₹${Math.round(currentValue)} of ₹${Math.round(threshold)}` : `${category} spend ₹${Math.round(currentValue)} (${Math.round(pct)}% of budget)`) : `${category} spend ₹${Math.round(currentValue)}`;
+  }
+
+  else if (metricName === 'Unusual_Spending') {
+    currentValue = getDailyTotal(expenses);
+    const avg30 = get30DayAverage(expenses);
+    threshold = avg30 * (settings.Unusual_Multiplier || 2);
+    thresholdSource = '30Day_Avg';
+    shouldNotify = avg30 > 0 ? currentValue > threshold : false;
+    severity = shouldNotify ? 'WARNING' : 'INFO';
+    msg = shouldNotify ? `Unusual spending detected: Today's spending ₹${Math.round(currentValue)} exceeds ${Math.round(settings.Unusual_Multiplier || 2)}× daily average (₹${Math.round(avg30)}).` : `Today's spending ₹${Math.round(currentValue)}.`;
+  }
+
+  else if (metricName === 'Monthly_Comparison') {
+    currentValue = getMonthlyTotal(expenses);
+    const avg3 = get3MonthAverage(expenses);
+    threshold = avg3;
+    thresholdSource = '3Month_Avg';
+    if (avg3 > 0) {
+      const percentDiff = ((currentValue - avg3) / avg3) * 100;
+      shouldNotify = Math.abs(percentDiff) > 10;
+      severity = percentDiff > 50 ? 'CRITICAL' : percentDiff > 20 ? 'WARNING' : 'INFO';
+      msg = percentDiff > 0 ? `Your spending is ${Math.round(percentDiff)}% higher than your 3-month average (₹${Math.round(avg3)}).` : `Great job! You're ${Math.round(Math.abs(percentDiff))}% under your 3-month average.`;
+    } else {
+      shouldNotify = false;
+      msg = `No 3-month baseline available.`;
+    }
+  }
+
+  // --- Behavior & Insights metrics ---
+  else if (metricName === 'Consecutive_Food_Days') {
+    const streak = getConsecutiveSpendDays(expenses, 'Food');
+    currentValue = streak;
+    threshold = 5;
+    thresholdSource = 'User_Defined';
+    shouldNotify = streak >= threshold;
+    severity = shouldNotify ? 'INFO' : 'INFO';
+    msg = `You've spent money for ${streak} consecutive days on Food.`;
+  }
+
+  else if (metricName === 'NoSpend_Streak') {
+    const noSpend = getConsecutiveNoSpendDays(expenses);
+    currentValue = noSpend;
+    threshold = 5;
+    thresholdSource = 'User_Defined';
+    shouldNotify = noSpend >= threshold;
+    severity = 'INFO';
+    msg = `You have ${noSpend} consecutive no-spend days.`;
+  }
+
+  else if (metricName === 'PaymentMode_CreditShare') {
+    const shares = getPaymentModeShares(expenses);
+    currentValue = shares.creditPct || 0;
+    threshold = 85; // percent
+    thresholdSource = 'User_Defined';
+    shouldNotify = currentValue >= threshold;
+    severity = shouldNotify ? 'INFO' : 'INFO';
+    msg = `Credit card usage is ${Math.round(currentValue)}% of expenses.`;
+  }
+
+  else if (metricName === 'Vendor_Swiggy') {
+    const count = getVendorCount(expenses, 'Swiggy', 30);
+    currentValue = count;
+    threshold = 10;
+    thresholdSource = 'User_Defined';
+    shouldNotify = count >= threshold;
+    severity = 'INFO';
+    msg = `You've visited Swiggy ${count} times this month.`;
+  }
+
+  else if (metricName === 'Vendor_Activity_Top3') {
+    const top = getTopVendors(expenses, 3);
+    currentValue = top.map(t => `${t.vendor}:${t.count}`).join(', ');
+    threshold = 0;
+    thresholdSource = 'Computed';
+    shouldNotify = false;
+    severity = 'INFO';
+    msg = `Top vendors: ${currentValue}`;
+  }
+
+  else if (metricName === 'Label_Impulse_Total') {
+    const totalImpulse = getLabelTotal(expenses, 'Impulse', 30);
+    currentValue = totalImpulse;
+    threshold = 3000;
+    thresholdSource = 'User_Defined';
+    shouldNotify = totalImpulse >= threshold;
+    severity = shouldNotify ? 'WARNING' : 'INFO';
+    msg = `Expenses tagged 'Impulse' total ₹${Math.round(totalImpulse)} this month.`;
+  }
+
+  // --- Financial Health metrics ---
+  else if (metricName === 'Savings_Rate') {
+    const income = Number(settings.Income) || 0;
+    const monthlySpend = getMonthlyTotal(expenses);
+    currentValue = income > 0 ? ((income - monthlySpend) / income) * 100 : null; // percent saved
+    threshold = 15; // desired savings percent
+    thresholdSource = 'User_Defined';
+    shouldNotify = (currentValue !== null) ? currentValue < threshold : false;
+    severity = shouldNotify ? 'WARNING' : 'INFO';
+    msg = income > 0 ? `Your expense-to-income ratio indicates you save ${Math.round(currentValue)}% of income.` : `Income not set.`;
+  }
+
+  else if (metricName === 'Expense_Concentration_Top2') {
+    const top2share = getTopCategoryShare(expenses, 2);
+    currentValue = top2share * 100;
+    threshold = 70;
+    thresholdSource = 'User_Defined';
+    shouldNotify = currentValue >= threshold;
+    severity = shouldNotify ? 'WARNING' : 'INFO';
+    msg = `Top 2 categories account for ${Math.round(currentValue)}% of spending.`;
+  }
+
+  else if (metricName === 'Subscription_Detected') {
+    const rec = detectRecurringVendors(expenses);
+    currentValue = rec.length;
+    threshold = 1;
+    thresholdSource = 'Computed';
+    shouldNotify = rec.length > 0;
+    severity = 'INFO';
+    msg = rec.length > 0 ? `Detected recurring expenses: ${rec.join('; ')}` : `No recurring subscriptions detected.`;
+  }
+
+  else if (metricName === 'Rent_Reminder') {
+    // Rent due date should be provided in User_Settings as Rent_Due (yyyy-mm-dd) and Rent_Amount
+    const rentDue = settings.Rent_Due || null;
+    const rentAmount = settings.Rent_Amount || null;
+    currentValue = rentDue ? daysUntil(new Date(rentDue)) : null;
+    threshold = 5; // days
+    thresholdSource = 'User_Defined';
+    shouldNotify = currentValue !== null && currentValue <= threshold && currentValue >= 0;
+    severity = 'INFO';
+    msg = rentDue ? `Rent due in ${currentValue} days${rentAmount ? ` (₹${rentAmount})` : ''}` : 'Rent not configured.';
+  }
+
+  // --- Data quality / maintenance metrics ---
+  else if (metricName === 'Missing_Data') {
+    const missingCount = countMissingFields(expenses);
+    currentValue = missingCount;
+    threshold = 1;
+    thresholdSource = 'Computed';
+    shouldNotify = missingCount > 0;
+    severity = 'INFO';
+    msg = `${missingCount} expenses have missing category or shop name.`;
+  }
+
+  else if (metricName === 'Duplicate_Transactions') {
+    const dupes = findDuplicateTransactions(expenses);
+    currentValue = dupes.length;
+    threshold = 1;
+    thresholdSource = 'Computed';
+    shouldNotify = dupes.length > 0;
+    severity = dupes.length > 0 ? 'WARNING' : 'INFO';
+    msg = dupes.length > 0 ? `Possible duplicate transactions: ${dupes.slice(0,3).map(d => `₹${d.amount} at ${d.vendor} on ${d.date}`).join(' ; ')}` : 'No duplicates found.';
+  }
+
+  else if (metricName === 'MovingAvg_Comparison_Category') {
+    // compute for top categories: store as summary string
+    const cmp = compareCategoryMovingAvg(expenses, 3);
+    currentValue = cmp.map(c => `${c.category}:${Math.round(c.pct)}%`).join(', ');
+    threshold = 0;
+    thresholdSource = 'Computed';
+    shouldNotify = false;
+    severity = 'INFO';
+    msg = `Category moving avg comparisons: ${currentValue}`;
+  }
+
+  else {
+    // Unknown metric - do nothing
+    return;
+  }
+
+  // --- Update metrics sheet and decide whether to create notification ---
+  const sheet = getSheet(SHEETS.METRICS);
+  if (!sheet) return;
+
+  // Read previous row to dedupe
+  const oldRow = sheet.getRange(rowIndex, 1, 1, 10).getValues()[0] || [];
+  const oldValue = oldRow[1];
+  const oldThreshold = oldRow[2];
+  const oldRaise = oldRow[7];
+
+  // compute next check time based on period stored in sheet (col 5 -> index 4)
+  const period = oldRow[4] || 'Daily';
+  const nextCheck = calculateNextCheck(period, now);
+
+  // Set row values: Metric Name, Current Value, Threshold, Threshold Source, Period, Last Calculated, Next Check, Raise Notification, Severity, Metric Type (existing col)
+  const metricType = oldRow[9] || ''; // keep existing type if present
+  const writeRow = [
+    metricName,
+    (typeof currentValue === 'number') ? currentValue : (currentValue === null ? '' : String(currentValue)),
+    threshold === null ? '' : threshold,
+    thresholdSource,
+    period,
+    now,
+    nextCheck,
+    shouldNotify,
+    severity,
+    metricType
+  ];
+  sheet.getRange(rowIndex, 1, 1, 10).setValues([writeRow]);
+
+  // If we should notify and previous state was not already notifying or value/threshold changed, create notification
+  const valueChanged = oldValue !== writeRow[1];
+  const thresholdChanged = oldThreshold !== writeRow[2];
+
+  if (shouldNotify && (!oldRaise || valueChanged || thresholdChanged)) {
+    // createNotification handles Notification_History write + webhook
+    createNotification(metricName, writeRow[1], writeRow[2], severity, msg);
+  }
+}
+
+/* =========================
+   Metric helper functions
+   ========================= */
+
+/** getDailyTotal(expenses) - sum of today's amounts (date column in 'yyyy-MM-dd') */
+function getDailyTotal(expenses) {
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return expenses.filter(e => e.date === today).reduce((s, e) => s + e.amount, 0);
+}
+
+/** getWeeklyTotal - last 7 days (including today) */
+function getWeeklyTotal(expenses) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 6); // includes today => 7 days total
+  return expenses.filter(e => new Date(e.date) >= startOfDay(cutoff)).reduce((s, e) => s + e.amount, 0);
+}
+
+/** getMonthlyTotal - last 30 days */
+function getMonthlyTotal(expenses) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 29); // 30 days including today
+  return expenses.filter(e => new Date(e.date) >= startOfDay(cutoff)).reduce((s, e) => s + e.amount, 0);
+}
+
+/** getCategoryTotal(expenses, category) - monthly (30 days) */
+function getCategoryTotal(expenses, category) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 29);
+  return expenses.filter(e => e.category === category && new Date(e.date) >= startOfDay(cutoff)).reduce((s, e) => s + e.amount, 0);
+}
+
+/** get30DayAverage */
+function get30DayAverage(expenses) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 29);
+  const totalsByDate = {};
+  expenses.filter(e => new Date(e.date) >= startOfDay(cutoff)).forEach(e => {
+    totalsByDate[e.date] = (totalsByDate[e.date] || 0) + e.amount;
+  });
+  const days = Object.keys(totalsByDate).length || 30;
+  const total = Object.values(totalsByDate).reduce((s, v) => s + v, 0);
+  return total / days;
+}
+
+/** get3MonthAverage (returns monthly average for last 3 months) */
+function get3MonthAverage(expenses) {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 3);
+  const total = expenses.filter(e => new Date(e.date) >= startOfDay(cutoff)).reduce((s,e)=> s + e.amount, 0);
+  return total / 3;
+}
+
+/** checkBudgetThresholdGeneric(percent) - percent is (current/threshold)*100 */
+function checkBudgetThresholdGeneric(percent) {
+  if (!percent || percent === 0) return { severity: 'INFO', shouldNotify: false };
+  if (percent >= 100) return { severity: 'CRITICAL', shouldNotify: true };
+  if (percent >= 80) return { severity: 'WARNING', shouldNotify: true };
+  return { severity: 'INFO', shouldNotify: false };
+}
+
+/* Behavior helpers */
+function getDayOfWeekProgress() {
+  // Use ISO week style: Monday=1,...Sunday=7. For simplicity derive days elapsed since start of week (Mon)
+  const today = new Date();
+  const day = ((today.getDay() + 6) % 7) + 1; // Monday=1
+  return day;
+}
+
+function getConsecutiveSpendDays(expenses, category) {
+  // Count consecutive days (including today) where category had spend
+  const today = new Date();
+  let streak = 0;
+  for (let d = 0; d < 365; d++) { // limit to a year
+    const check = new Date();
+    check.setDate(today.getDate() - d);
+    const dateStr = Utilities.formatDate(check, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    const has = expenses.some(e => e.date === dateStr && e.category === category);
+    if (has) streak++; else break;
+  }
+  return streak;
+}
+
+function getConsecutiveNoSpendDays(expenses) {
+  const today = new Date();
+  let streak = 0;
+  for (let d = 0; d < 365; d++) {
+    const check = new Date();
+    check.setDate(today.getDate() - d);
+    const dateStr = Utilities.formatDate(check, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    const has = expenses.some(e => e.date === dateStr);
+    if (!has) streak++; else break;
+  }
+  return streak;
+}
+
+function getPaymentModeShares(expenses) {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 1); // last 30 days
+  const filtered = expenses.filter(e => new Date(e.date) >= startOfDay(cutoff));
+  const total = filtered.reduce((s, e) => s + e.amount, 0) || 1;
+  const byMode = {};
+  filtered.forEach(e => { const mode = e.paymentMode || 'Unknown'; byMode[mode] = (byMode[mode] || 0) + e.amount; });
+  return {
+    creditPct: Math.round((byMode['Credit Card'] || 0) / total * 100),
+    upiPct: Math.round((byMode['UPI'] || 0) / total * 100),
+    cashPct: Math.round((byMode['Cash'] || 0) / total * 100),
+    details: byMode
+  };
+}
+
+/* Vendor helpers */
+function getVendorCount(expenses, vendorName, days) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - (days || 30) + 1);
+  return expenses.filter(e => e.shopName && e.shopName.toLowerCase().indexOf(vendorName.toLowerCase()) !== -1 && new Date(e.date) >= startOfDay(cutoff)).length;
+}
+
+function getTopVendors(expenses, topN) {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 1); // last 30 days
+  const filtered = expenses.filter(e => new Date(e.date) >= startOfDay(cutoff));
+  const counts = {};
+  filtered.forEach(e => {
+    const v = (e.shopName || 'Unknown').trim();
+    counts[v] = (counts[v] || 0) + 1;
+  });
+  const arr = Object.keys(counts).map(k => ({ vendor: k, count: counts[k] })).sort((a,b)=>b.count-a.count);
+  return arr.slice(0, topN);
+}
+
+/* Label helper */
+function getLabelTotal(expenses, labelName, days) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - (days || 30) + 1);
+  return expenses.filter(e => new Date(e.date) >= startOfDay(cutoff) && e.labels && String(e.labels).toLowerCase().indexOf(labelName.toLowerCase()) !== -1)
+                 .reduce((s,e)=>s+e.amount, 0);
+}
+
+/* Financial Health helpers */
+function getTopCategoryShare(expenses, topN) {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 1);
+  const filtered = expenses.filter(e => new Date(e.date) >= startOfDay(cutoff));
+  const totals = {};
+  filtered.forEach(e => { const c = e.category || 'Uncategorized'; totals[c] = (totals[c] || 0) + e.amount; });
+  const total = filtered.reduce((s,e)=>s+e.amount,0) || 1;
+  const sorted = Object.keys(totals).map(k=>({category:k,amt:totals[k]})).sort((a,b)=>b.amt-a.amt);
+  const top = sorted.slice(0, topN).reduce((s,x)=>s + x.amt, 0);
+  return top / total;
+}
+
+/* Recurring / subscription detection (simple heuristic) */
+function detectRecurringVendors(expenses) {
+  // Look for vendor-amount pairs that appear ~monthly 2+ times in last 90 days
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90);
+  const filtered = expenses.filter(e => new Date(e.date) >= startOfDay(cutoff));
+  const keyCounts = {};
+  filtered.forEach(e => {
+    const key = `${(e.shopName||'').toLowerCase().trim()}|${Math.round(e.amount)}`;
+    keyCounts[key] = keyCounts[key] || {count:0, vendor:e.shopName, amount:e.amount};
+    keyCounts[key].count++;
+  });
+  // Heuristic: if count >=2 in 90 days, treat as recurring monthly-ish
+  const rec = [];
+  Object.keys(keyCounts).forEach(k => {
+    if (keyCounts[k].count >= 2 && keyCounts[k].vendor) rec.push(`${keyCounts[k].vendor} ₹${Math.round(keyCounts[k].amount)}`);
+  });
+  return rec;
+}
+
+/* Data quality helpers */
+function countMissingFields(expenses) {
+  return expenses.filter(e => !e.category || !e.shopName).length;
+}
+
+function findDuplicateTransactions(expenses) {
+  // Duplicate = same date, same vendor, same amount (within same day). Return sample duplicates.
+  const map = {};
+  const dupes = [];
+  expenses.forEach(e => {
+    const k = `${e.date}|${(e.shopName||'').toLowerCase().trim()}|${Math.round(e.amount)}`;
+    map[k] = map[k] || [];
+    map[k].push(e);
+  });
+  Object.keys(map).forEach(k => { if (map[k].length > 1) dupes.push(map[k][0]); });
+  return dupes;
+}
+
+function compareCategoryMovingAvg(expenses, months) {
+  // For each category compute current month total vs 3 month average and return percentage diff
+  const currentMonth = new Date();
+  const thisMonthTotals = {};
+  const last3MonthsTotals = {};
+  expenses.forEach(e => {
+    const d = new Date(e.date);
+    const cat = e.category || 'Uncategorized';
+    // current month total
+    if (d.getMonth() === currentMonth.getMonth() && d.getFullYear() === currentMonth.getFullYear()) {
+      thisMonthTotals[cat] = (thisMonthTotals[cat] || 0) + e.amount;
+    }
+    // last 90 days (approx 3 months)
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - (months||3));
+    if (d >= startOfDay(threeMonthsAgo)) {
+      last3MonthsTotals[cat] = (last3MonthsTotals[cat] || 0) + e.amount;
+    }
+  });
+  const res = [];
+  Object.keys(thisMonthTotals).forEach(cat => {
+    const current = thisMonthTotals[cat] || 0;
+    const avg3 = (last3MonthsTotals[cat] || 0) / (months || 3);
+    const pct = avg3 ? ((current - avg3) / avg3) * 100 : 0;
+    res.push({ category: cat, current, avg3, pct });
+  });
+  return res.sort((a,b)=>Math.abs(b.pct)-Math.abs(a.pct)).slice(0,5);
+}
+
+/* Date helpers */
+function startOfDay(d) {
+  const x = new Date(d); x.setHours(0,0,0,0); return x;
+}
+function daysUntil(d) {
+  const now = startOfDay(new Date());
+  const target = startOfDay(new Date(d));
+  return Math.ceil((target - now) / (1000*60*60*24));
+}

@@ -1,0 +1,485 @@
+/*******************************************************
+ * chatbot.gs - Google Apps Script Chatbot Backend
+ * Add this to your existing Apps Script project
+ *******************************************************/
+
+/**
+ * Generate intelligent insights from expense data
+ * Called by app or can be triggered periodically
+ */
+function generateExpenseInsights() {
+  const sheet = getSheet(SHEETS.EXPENSES);
+  if (!sheet) return [];
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  // Parse expenses
+  const expenses = rows.map(row => {
+    const obj = {};
+    headers.forEach((header, idx) => {
+      obj[header] = row[idx];
+    });
+    return obj;
+  });
+
+  const insights = [];
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  // Filter current month expenses
+  const currentMonthExpenses = expenses.filter(e => {
+    const expenseDate = new Date(e.Date);
+    return expenseDate.getMonth() === currentMonth && 
+           expenseDate.getFullYear() === currentYear;
+  });
+
+  // Calculate metrics
+  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+  const avgDaily = totalSpent / now.getDate();
+  
+  // Category analysis
+  const categoryMap = {};
+  currentMonthExpenses.forEach(e => {
+    const cat = e.Category || 'Uncategorized';
+    categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
+  });
+
+  const topCategory = Object.entries(categoryMap)
+    .sort((a, b) => b[1] - a[1])[0];
+
+  // Weekly comparison
+  const weekAgo = new Date(now);
+  weekAgo.setDate(now.getDate() - 7);
+  const lastWeekExpenses = currentMonthExpenses.filter(e => {
+    const expenseDate = new Date(e.Date);
+    return expenseDate >= weekAgo && expenseDate <= now;
+  });
+  const lastWeekTotal = lastWeekExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+
+  const twoWeeksAgo = new Date(now);
+  twoWeeksAgo.setDate(now.getDate() - 14);
+  const prevWeekExpenses = currentMonthExpenses.filter(e => {
+    const expenseDate = new Date(e.Date);
+    return expenseDate >= twoWeeksAgo && expenseDate < weekAgo;
+  });
+  const prevWeekTotal = prevWeekExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+
+  // Generate insights
+  
+  // 1. Daily spending alert
+  const todayExpenses = currentMonthExpenses.filter(e => {
+    const expenseDate = new Date(e.Date);
+    return expenseDate.toDateString() === now.toDateString();
+  });
+  const todayTotal = todayExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+  
+  if (todayTotal > avgDaily * 1.5) {
+    insights.push({
+      type: 'alert',
+      category: 'spending',
+      title: 'High Spending Alert',
+      message: `Today's spending (₹${todayTotal.toFixed(2)}) is ${((todayTotal / avgDaily - 1) * 100).toFixed(0)}% above your daily average (₹${avgDaily.toFixed(2)})`,
+      severity: 'high',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // 2. Weekly comparison
+  if (prevWeekTotal > 0) {
+    const weekChange = ((lastWeekTotal - prevWeekTotal) / prevWeekTotal) * 100;
+    if (Math.abs(weekChange) > 20) {
+      insights.push({
+        type: 'trend',
+        category: 'weekly',
+        title: weekChange > 0 ? 'Weekly Spending Increased' : 'Weekly Spending Decreased',
+        message: `This week's spending (₹${lastWeekTotal.toFixed(2)}) is ${Math.abs(weekChange).toFixed(0)}% ${weekChange > 0 ? 'higher' : 'lower'} than last week (₹${prevWeekTotal.toFixed(2)})`,
+        severity: weekChange > 0 ? 'medium' : 'low',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  // 3. Category overspending
+  if (topCategory && topCategory[1] > totalSpent * 0.4) {
+    insights.push({
+      type: 'alert',
+      category: 'category',
+      title: `${topCategory[0]} Dominates Spending`,
+      message: `${topCategory[0]} accounts for ${((topCategory[1] / totalSpent) * 100).toFixed(0)}% of your monthly spending (₹${topCategory[1].toFixed(2)})`,
+      severity: 'medium',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // 4. Impulse purchase detection
+  const impulseExpenses = currentMonthExpenses.filter(e => {
+    const labels = e.Labels || '';
+    return labels.toLowerCase().includes('impulse');
+  });
+  const impulseTotal = impulseExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+  
+  if (impulseTotal > totalSpent * 0.15) {
+    insights.push({
+      type: 'behavioral',
+      category: 'impulse',
+      title: 'High Impulse Spending',
+      message: `Impulse purchases (₹${impulseTotal.toFixed(2)}) represent ${((impulseTotal / totalSpent) * 100).toFixed(0)}% of your spending. Consider setting a budget for discretionary expenses.`,
+      severity: 'medium',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // 5. Vendor frequency analysis
+  const vendorMap = {};
+  currentMonthExpenses.forEach(e => {
+    const vendor = e['Shop/Site/Person name'] || 'Unknown';
+    if (vendor !== 'Unknown') {
+      vendorMap[vendor] = (vendorMap[vendor] || 0) + 1;
+    }
+  });
+  
+  const frequentVendors = Object.entries(vendorMap)
+    .filter(([_, count]) => count >= 5)
+    .sort((a, b) => b[1] - a[1]);
+  
+  if (frequentVendors.length > 0) {
+    const topVendor = frequentVendors[0];
+    insights.push({
+      type: 'behavioral',
+      category: 'vendor',
+      title: 'Frequent Vendor Alert',
+      message: `You've made ${topVendor[1]} transactions at ${topVendor[0]} this month. Consider bulk purchasing or subscription options for savings.`,
+      severity: 'low',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // 6. Payment method analysis
+  const paymentMap = {};
+  currentMonthExpenses.forEach(e => {
+    const method = e['Mode of payment'] || 'Unknown';
+    paymentMap[method] = (paymentMap[method] || 0) + parseFloat(e.Amount || 0);
+  });
+  
+  const paymentEntries = Object.entries(paymentMap);
+  if (paymentEntries.length > 0) {
+    const topPayment = paymentEntries.sort((a, b) => b[1] - a[1])[0];
+    const percentage = (topPayment[1] / totalSpent) * 100;
+    
+    if (percentage > 70) {
+      insights.push({
+        type: 'behavioral',
+        category: 'payment',
+        title: 'Payment Method Preference',
+        message: `${topPayment[0]} accounts for ${percentage.toFixed(0)}% (₹${topPayment[1].toFixed(2)}) of your spending. Ensure you're maximizing rewards and cashback.`,
+        severity: 'low',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  // 7. Zero-spend streak detection
+  const dateSet = new Set();
+  currentMonthExpenses.forEach(e => {
+    const expenseDate = new Date(e.Date);
+    dateSet.add(expenseDate.toDateString());
+  });
+  
+  const zeroSpendDays = now.getDate() - dateSet.size;
+  if (zeroSpendDays >= 3) {
+    insights.push({
+      type: 'positive',
+      category: 'savings',
+      title: 'Great Saving Streak!',
+      message: `You've had ${zeroSpendDays} zero-spend days this month. Keep up the excellent financial discipline!`,
+      severity: 'low',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // 8. Spending burst detection (multiple transactions in short time)
+  const timeMap = {};
+  currentMonthExpenses.forEach(e => {
+    const timestamp = e.Timestamp;
+    if (timestamp) {
+      const hour = new Date(timestamp).getHours();
+      const dateKey = new Date(timestamp).toDateString();
+      const key = `${dateKey}-${hour}`;
+      timeMap[key] = (timeMap[key] || 0) + 1;
+    }
+  });
+  
+  const bursts = Object.entries(timeMap).filter(([_, count]) => count >= 3);
+  if (bursts.length > 0) {
+    insights.push({
+      type: 'behavioral',
+      category: 'pattern',
+      title: 'Spending Burst Detected',
+      message: `You made ${bursts[0][1]} transactions within an hour on ${bursts[0][0].split('-')[0]}. This might indicate emotional spending or shopping sprees.`,
+      severity: 'medium',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // 9. Month-on-month comparison
+  const lastMonth = new Date(currentYear, currentMonth - 1, 1);
+  const lastMonthExpenses = expenses.filter(e => {
+    const expenseDate = new Date(e.Date);
+    return expenseDate.getMonth() === lastMonth.getMonth() && 
+           expenseDate.getFullYear() === lastMonth.getFullYear();
+  });
+  const lastMonthTotal = lastMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+  
+  if (lastMonthTotal > 0) {
+    const monthChange = ((totalSpent - lastMonthTotal) / lastMonthTotal) * 100;
+    if (Math.abs(monthChange) > 15) {
+      insights.push({
+        type: 'trend',
+        category: 'monthly',
+        title: monthChange > 0 ? 'Monthly Spending Up' : 'Monthly Spending Down',
+        message: `Your spending this month (₹${totalSpent.toFixed(2)}) is ${Math.abs(monthChange).toFixed(0)}% ${monthChange > 0 ? 'higher' : 'lower'} than last month (₹${lastMonthTotal.toFixed(2)})`,
+        severity: monthChange > 0 ? 'medium' : 'low',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  // 10. Peak spending time analysis
+  const hourMap = {};
+  currentMonthExpenses.forEach(e => {
+    if (e.Timestamp) {
+      const hour = new Date(e.Timestamp).getHours();
+      hourMap[hour] = (hourMap[hour] || 0) + 1;
+    }
+  });
+  
+  if (Object.keys(hourMap).length > 0) {
+    const peakHour = Object.entries(hourMap)
+      .sort((a, b) => b[1] - a[1])[0];
+    
+    insights.push({
+      type: 'behavioral',
+      category: 'timing',
+      title: 'Peak Spending Time',
+      message: `Most of your transactions (${peakHour[1]}) occur around ${peakHour[0]}:00. Being aware of your spending patterns can help with budgeting.`,
+      severity: 'low',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  return insights;
+}
+
+
+/**
+ * Store insights as notifications
+ */
+function storeInsightsAsNotifications(insights) {
+  const notifSheet = getSheet(SHEETS.NOTIFICATIONS);
+  if (!notifSheet) return;
+
+  insights.forEach(insight => {
+    const id = `insight-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const row = [
+      id,
+      insight.title,
+      insight.message,
+      insight.type,
+      insight.category,
+      insight.severity,
+      'unread',         // status
+      'active',         // visibility
+      new Date().toISOString(), // createdAt
+      '',               // dismissedAt
+      'pending'         // deliveryStatus: 'pending', 'delivered', 'failed'
+    ];
+    notifSheet.appendRow(row);
+  });
+}
+
+function getUndeliveredInsights(sinceDate) {
+  const notifSheet = getSheet(SHEETS.NOTIFICATIONS);
+  if (!notifSheet) return [];
+
+  const data = notifSheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  // Find column indices
+  const idIdx = headers.indexOf('ID');
+  const titleIdx = headers.indexOf('Title');
+  const messageIdx = headers.indexOf('Message');
+  const typeIdx = headers.indexOf('Type');
+  const categoryIdx = headers.indexOf('Category');
+  const severityIdx = headers.indexOf('Severity');
+  const createdAtIdx = headers.indexOf('CreatedAt');
+  const deliveryStatusIdx = headers.indexOf('DeliveryStatus');
+
+  const insights = [];
+  
+  rows.forEach(row => {
+    const deliveryStatus = row[deliveryStatusIdx] || 'pending';
+    const createdAt = row[createdAtIdx] ? new Date(row[createdAtIdx]) : null;
+    
+    // Filter: only pending insights
+    if (deliveryStatus !== 'pending') return;
+    
+    // Filter by date if provided
+    if (sinceDate && createdAt && createdAt <= sinceDate) return;
+    
+    insights.push({
+      id: row[idIdx],
+      title: row[titleIdx],
+      message: row[messageIdx],
+      type: row[typeIdx],
+      category: row[categoryIdx],
+      severity: row[severityIdx],
+      timestamp: createdAt ? createdAt.toISOString() : new Date().toISOString()
+    });
+  });
+
+  return insights;
+}
+
+/**
+ * Mark insight as delivered in chat
+ */
+function markInsightAsDelivered(insightId) {
+  const notifSheet = getSheet(SHEETS.NOTIFICATIONS);
+  if (!notifSheet) return { success: false, message: 'Sheet not found' };
+
+  const data = notifSheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf('ID');
+  const deliveryStatusIdx = headers.indexOf('DeliveryStatus');
+
+  if (idIdx === -1 || deliveryStatusIdx === -1) {
+    return { success: false, message: 'Column not found' };
+  }
+
+  // Find the row with this insight ID
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idIdx] === insightId) {
+      notifSheet.getRange(i + 1, deliveryStatusIdx + 1).setValue('delivered');
+      return { success: true, message: 'Insight marked as delivered' };
+    }
+  }
+
+  return { success: false, message: 'Insight not found' };
+}
+/**
+ * Chatbot query endpoint - process natural language queries
+ */
+function processChatbotQuery(query) {
+  const sheet = getSheet(SHEETS.EXPENSES);
+  if (!sheet) return { success: false, message: 'No expense data found' };
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  // Parse expenses
+  const expenses = rows.map(row => {
+    const obj = {};
+    headers.forEach((header, idx) => {
+      obj[header] = row[idx];
+    });
+    return obj;
+  });
+
+  // Simple rule-based response (you can enhance with AI)
+  const lowerQuery = query.toLowerCase();
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  const currentMonthExpenses = expenses.filter(e => {
+    const expenseDate = new Date(e.Date);
+    return expenseDate.getMonth() === currentMonth && 
+           expenseDate.getFullYear() === currentYear;
+  });
+
+  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+
+  // Category analysis
+  if (lowerQuery.includes('category') || lowerQuery.includes('categories')) {
+    const categoryMap = {};
+    currentMonthExpenses.forEach(e => {
+      const cat = e.Category || 'Uncategorized';
+      categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
+    });
+
+    const sorted = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
+    const response = `Your top spending categories this month:\n${sorted.slice(0, 5).map(([cat, amt]) => `• ${cat}: ₹${amt.toFixed(2)}`).join('\n')}`;
+    
+    return { success: true, response };
+  }
+
+  // Total spending
+  if (lowerQuery.includes('total') || lowerQuery.includes('spent')) {
+    return { 
+      success: true, 
+      response: `This month you've spent ₹${totalSpent.toFixed(2)} across ${currentMonthExpenses.length} transactions.` 
+    };
+  }
+
+  // Trend analysis
+  if (lowerQuery.includes('trend') || lowerQuery.includes('pattern')) {
+    const insights = generateExpenseInsights();
+    const trendInsights = insights.filter(i => i.type === 'trend');
+    
+    if (trendInsights.length > 0) {
+      return { 
+        success: true, 
+        response: trendInsights.map(i => i.message).join('\n\n') 
+      };
+    }
+  }
+
+  // Default response
+  return {
+    success: true,
+    response: `I analyzed your expenses. This month: ₹${totalSpent.toFixed(2)} spent across ${currentMonthExpenses.length} transactions. Ask me about categories, trends, or specific insights!`
+  };
+}
+
+/**
+ * Scheduled trigger to generate insights daily
+ */
+function dailyInsightGeneration() {
+  const insights = generateExpenseInsights();
+  
+  // Only store high and medium severity insights as notifications
+  const importantInsights = insights.filter(i => 
+    i.severity === 'high' || i.severity === 'medium'
+  );
+  
+  if (importantInsights.length > 0) {
+    storeInsightsAsNotifications(importantInsights);
+    Logger.log(`Generated ${importantInsights.length} insights`);
+  }
+}
+
+/**
+ * Setup daily insight trigger
+ */
+function setupInsightTrigger() {
+  // Remove existing insight triggers
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'dailyInsightGeneration') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  // Run daily at 9 AM
+  ScriptApp.newTrigger('dailyInsightGeneration')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)
+    .create();
+
+  Logger.log('Daily insight trigger created');
+}

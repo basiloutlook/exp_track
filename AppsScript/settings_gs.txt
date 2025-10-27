@@ -1,0 +1,201 @@
+/********************************************************
+ * settings.gs
+ * - getUserSettings / updateUserSettings
+ * - initializeMetrics based on settings (creates metric rows)
+ * - header helpers and sheet creation utilities
+ ********************************************************/
+
+/**
+ * getUserSettings()
+ * Returns an object mapping Setting Name -> Value for rows where Enabled is truthy.
+ * Expected User_Settings columns: Setting Name | Value | Enabled | Last Updated
+ */
+function getUserSettings() {
+  const sheet = getOrCreateSheet(SHEETS.SETTINGS, getSettingsHeaders());
+  if (sheet.getLastRow() < 2) return {};
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+  const settings = {};
+  data.forEach(row => {
+    const name = row[0];
+    const value = row[1];
+    const enabled = !!row[2];
+    if (name && enabled) settings[name] = value;
+  });
+  return settings;
+}
+
+/**
+ * updateUserSettings(settingsObject)
+ * - Rewrites User_Settings sheet with provided settings object
+ * - Calls initializeMetrics() to refresh metric rows
+ */
+function updateUserSettings(settingsObj) {
+  const sheet = getOrCreateSheet(SHEETS.SETTINGS, getSettingsHeaders());
+  // Clear existing
+  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
+
+  const rows = [];
+  for (const [k, v] of Object.entries(settingsObj)) {
+    rows.push([k, v, true, new Date()]);
+  }
+  if (rows.length > 0) sheet.getRange(2, 1, rows.length, 4).setValues(rows);
+
+  // Re-init metrics based on settings
+  const settings = getUserSettings();
+  initializeMetrics(settings);
+  calculateAllMetrics();
+  return { success: true, message: 'Settings updated' };
+}
+
+/**
+ * initializeMetrics(settings)
+ * - Populates the Metrics sheet with the canonical metric rows we compute.
+ * - Each row: Metric Name | Current Value | Threshold | Threshold Source | Period | Last Calculated | Next Check | Raise Notification | Severity | Metric Type
+ *
+ * Period values (used by scheduler): 'Instant', 'Every_4h', 'Every_8h', 'Every_12h', 'Daily'
+ */
+function initializeMetrics(settings) {
+  const sheet = getOrCreateSheet(SHEETS.METRICS, getMetricsHeaders());
+  // Clear existing metric rows (keep header)
+  if (sheet.getLastRow() > 1) sheet.deleteRows(2, sheet.getLastRow() - 1);
+
+  const rows = [];
+
+  // --- Budget & spending base metrics ---
+  rows.push(['Daily_Spending_Threshold', 0, 0, '30Day_Avg', 'Instant', new Date(), new Date(), false, 'INFO', 'Budget']);
+  if (settings.Weekly_Budget) rows.push(['Weekly_Predictive', 0, settings.Weekly_Budget, 'User_Defined', 'Every_8h', new Date(), new Date(), false, 'INFO', 'Budget']);
+  if (settings.Monthly_Budget) rows.push(['Monthly_Total', 0, settings.Monthly_Budget, 'User_Defined', 'Every_12h', new Date(), new Date(), false, 'INFO', 'Budget']);
+
+  // Category budgets from settings: keys ending with "_Budget" (e.g., Food_Budget)
+  Object.keys(settings).forEach(key => {
+    if (key.endsWith('_Budget') && !['Daily_Budget','Weekly_Budget','Monthly_Budget'].includes(key)) {
+      const category = key.replace('_Budget','');
+      rows.push([`Category_${category}`, 0, settings[key], 'User_Defined', 'Every_8h', new Date(), new Date(), false, 'INFO', 'Category']);
+    }
+  });
+
+  // Unusual spending and monthly comparison
+  if (settings.Unusual_Enabled) rows.push(['Unusual_Spending', 0, 0, '30Day_Avg', 'Instant', new Date(), new Date(), false, 'INFO', 'Unusual']);
+  if (settings.Monthly_Comparison_Enabled) rows.push(['Monthly_Comparison', 0, 0, '3Month_Avg', 'Daily', new Date(), new Date(), false, 'INFO', 'Comparison']);
+
+  // --- Behavior & insights metrics ---
+  rows.push(['Consecutive_Food_Days', 0, 5, 'User_Defined', 'Daily', new Date(), new Date(), false, 'INFO', 'Behavior']);
+  rows.push(['NoSpend_Streak', 0, 5, 'User_Defined', 'Daily', new Date(), new Date(), false, 'INFO', 'Behavior']);
+  rows.push(['PaymentMode_CreditShare', 0, 85, 'User_Defined', 'Every_12h', new Date(), new Date(), false, 'INFO', 'Behavior']);
+  rows.push(['Vendor_Swiggy', 0, 10, 'User_Defined', 'Daily', new Date(), new Date(), false, 'INFO', 'Behavior']);
+  rows.push(['Vendor_Activity_Top3', '', '', 'Computed', 'Daily', new Date(), new Date(), false, 'INFO', 'Behavior']);
+  rows.push(['Label_Impulse_Total', 0, 3000, 'User_Defined', 'Every_12h', new Date(), new Date(), false, 'INFO', 'Behavior']);
+
+  // --- Financial Health metrics ---
+  rows.push(['Savings_Rate', '', 15, 'User_Defined', 'Daily', new Date(), new Date(), false, 'INFO', 'Health']);
+  rows.push(['Expense_Concentration_Top2', 0, 70, 'User_Defined', 'Daily', new Date(), new Date(), false, 'INFO', 'Health']);
+  rows.push(['Subscription_Detected', 0, 0, 'Computed', 'Daily', new Date(), new Date(), false, 'INFO', 'Health']);
+  rows.push(['Rent_Reminder', '', 5, 'User_Defined', 'Daily', new Date(), new Date(), false, 'INFO', 'Health']);
+
+  // --- Data quality metrics ---
+  rows.push(['Missing_Data', 0, 1, 'Computed', 'Every_12h', new Date(), new Date(), false, 'INFO', 'Data']);
+  rows.push(['Duplicate_Transactions', 0, 1, 'Computed', 'Every_12h', new Date(), new Date(), false, 'WARNING', 'Data']);
+  rows.push(['MovingAvg_Comparison_Category', '', '', 'Computed', 'Daily', new Date(), new Date(), false, 'INFO', 'Data']);
+
+  if (rows.length > 0) sheet.getRange(2, 1, rows.length, 10).setValues(rows);
+
+  return { success: true, message: 'Metrics initialized' };
+}
+
+/* Header helpers called from main.oneTimeSetup */
+function getMetricsHeaders() {
+  return ['Metric Name', 'Current Value', 'Threshold', 'Threshold Source', 'Period', 'Last Calculated', 'Next Check', 'Raise Notification', 'Severity', 'Metric Type'];
+}
+function getNotificationHeaders() {
+  return ['ID', 'Metric Name', 'Timestamp', 'Message', 'Current Value', 'Threshold', 'Severity', 'Read', 'Dismissed'];
+}
+function getSettingsHeaders() {
+  return ['Setting Name', 'Value', 'Enabled', 'Last Updated'];
+}
+
+/**
+ * ensureSheetsExistAndHeaders() - convenience helper used by oneTimeSetup
+ */
+function ensureSheetsExistAndHeaders() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // ... existing code for other sheets ...
+  
+  // Update Notification_History sheet with DeliveryStatus column
+  let notifSheet = ss.getSheetByName(SHEETS.NOTIFICATIONS);
+  if (!notifSheet) {
+    notifSheet = ss.insertSheet(SHEETS.NOTIFICATIONS);
+  }
+  
+  // Check if headers exist
+  const notifHeaders = notifSheet.getRange(1, 1, 1, 11).getValues()[0];
+  if (!notifHeaders[0] || notifHeaders[0] !== 'ID') {
+    // Set headers including new DeliveryStatus column
+    notifSheet.getRange(1, 1, 1, 11).setValues([[
+      'ID', 
+      'Title', 
+      'Message', 
+      'Type', 
+      'Category', 
+      'Severity', 
+      'Status', 
+      'Visibility', 
+      'CreatedAt', 
+      'DismissedAt',
+      'DeliveryStatus'  // NEW: tracks if insight was delivered to chat
+    ]]);
+    notifSheet.getRange(1, 1, 1, 11).setFontWeight('bold');
+  } else {
+    // If sheet exists but DeliveryStatus column is missing, add it
+    const lastCol = notifSheet.getLastColumn();
+    if (lastCol < 11) {
+      notifSheet.getRange(1, 11).setValue('DeliveryStatus');
+      notifSheet.getRange(1, 11).setFontWeight('bold');
+      
+      // Set default value 'pending' for existing rows
+      const lastRow = notifSheet.getLastRow();
+      if (lastRow > 1) {
+        const range = notifSheet.getRange(2, 11, lastRow - 1, 1);
+        const values = Array(lastRow - 1).fill(['pending']);
+        range.setValues(values);
+      }
+    }
+  }
+  
+  Logger.log('Notification sheet updated with DeliveryStatus column');
+}
+
+/**
+ * One-time migration script to add DeliveryStatus to existing insights
+ */
+function migrateNotificationSheet() {
+  const notifSheet = getSheet(SHEETS.NOTIFICATIONS);
+  if (!notifSheet) {
+    Logger.log('Notification sheet not found');
+    return;
+  }
+  
+  const lastRow = notifSheet.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log('No data to migrate');
+    return;
+  }
+  
+  const headers = notifSheet.getRange(1, 1, 1, notifSheet.getLastColumn()).getValues()[0];
+  const deliveryStatusIdx = headers.indexOf('DeliveryStatus');
+  
+  if (deliveryStatusIdx === -1) {
+    Logger.log('Adding DeliveryStatus column...');
+    notifSheet.getRange(1, headers.length + 1).setValue('DeliveryStatus');
+    notifSheet.getRange(1, headers.length + 1).setFontWeight('bold');
+    
+    // Set all existing insights to 'delivered' (assume they were already seen)
+    const range = notifSheet.getRange(2, headers.length + 1, lastRow - 1, 1);
+    const values = Array(lastRow - 1).fill(['delivered']);
+    range.setValues(values);
+    
+    Logger.log(`Migrated ${lastRow - 1} existing insights with 'delivered' status`);
+  } else {
+    Logger.log('DeliveryStatus column already exists');
+  }
+}

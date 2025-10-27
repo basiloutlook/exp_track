@@ -1,0 +1,251 @@
+/*******************************************************
+ * main.gs
+ * - API endpoints (doGet/doPost)
+ * - Expense CRUD (add/update/delete)
+ * - Trigger setup and one-time initialization
+ *******************************************************/
+
+const SHEETS = {
+  EXPENSES: 'Form Responses 1',
+  METRICS: 'Metrics',
+  NOTIFICATIONS: 'Notification_History',
+  SETTINGS: 'User_Settings'
+};
+
+const MAX_NOTIFICATIONS = 100;
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents || '{}');
+    const action = data.action || 'add';
+
+    // Expense CRUD actions
+    if (['add', 'update', 'delete'].includes(action)) {
+      const result = handleExpenseAction(action, data);
+
+      // After mutating expenses, run instant metrics (small subset)
+      if (result.success) {
+        Utilities.sleep(1000); // small delay to allow row writes
+        calculateInstantMetrics(); // from metricsEngine.gs
+      }
+
+      return jsonResponse(result);
+    }
+
+    // Settings & admin actions
+    if (action === 'updateSettings') return jsonResponse(updateUserSettings(data.settings || {}));
+    if (action === 'calculateMetrics') return jsonResponse(calculateAllMetrics());
+    if (action === 'getNotifications') return jsonResponse(getNotifications(data.unreadOnly));
+    if (action === 'markNotificationRead') return jsonResponse(markNotificationRead(data.id));
+    if (action === 'markNotificationDismissed') return jsonResponse(markNotificationDismissed(data.id));
+    
+    // Existing chatbot actions
+    if (action === 'getChatInsights') {
+      const insights = generateExpenseInsights();
+      return jsonResponse({ success: true, insights });
+    }
+
+    if (action === 'chatQuery') {
+      const result = processChatbotQuery(data.query || '');
+      return jsonResponse(result);
+    }
+
+    // NEW: Insight delivery tracking actions
+    if (action === 'markInsightDelivered') {
+      return jsonResponse(markInsightAsDelivered(data.id));
+    }
+
+    if (action === 'generateInsights') {
+      const insights = generateExpenseInsights();
+      storeInsightsAsNotifications(insights);
+      return jsonResponse({ success: true, count: insights.length, message: `Generated ${insights.length} insights` });
+    }
+
+    return jsonResponse({ success: false, message: 'Invalid action' });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+function doGet(e) {
+  try {
+    const mode = (e.parameter.mode || 'raw').toLowerCase();
+
+    if (mode === 'notifications') return jsonResponse(getNotifications(false));
+    if (mode === 'unread') return jsonResponse(getNotifications(true));
+    if (mode === 'metrics') return jsonResponse(getCurrentMetrics());
+    if (mode === 'settings') return jsonResponse(getUserSettings());
+
+    // NEW: Handle insight requests for chat delivery
+    if (mode === 'insights') {
+      const sinceParam = e.parameter.since;
+      const sinceDate = sinceParam ? new Date(sinceParam) : null;
+      const insights = getUndeliveredInsights(sinceDate);
+      return jsonResponse(insights);
+    }
+
+    // Default: return expenses
+    return jsonResponse(getExpenses());
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message || String(err) });
+  }
+}
+
+/**
+ * handleExpenseAction(action, data)
+ * - add / update / delete rows in Form Responses 1
+ * Columns expected (sheet): 
+ * Timestamp | Date | Category | Sub Category | Item | Amount | Email Address | Shop/Site/Person name | Mode of payment | Labels | ID
+ */
+function handleExpenseAction(action, data) {
+  const sheet = getSheet(SHEETS.EXPENSES);
+  if (!sheet) return { success: false, message: 'Expenses sheet not found' };
+
+  if (action === 'add') {
+    const id = data.id || Date.now().toString();
+    const row = [
+      new Date(), // Timestamp
+      data.date || '', // Date (yyyy-mm-dd)
+      data.category || '',
+      data.subCategory || '',
+      data.item || '',
+      Number(data.amount) || 0,
+      data.email || '',
+      data.shopName || '',
+      data.paymentMode || '',
+      data.labels || '',
+      id
+    ];
+    sheet.appendRow(row);
+    return { success: true, id, message: 'Expense added' };
+  }
+
+  if (action === 'update') {
+    const finder = sheet.createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+    if (!finder) return { success: false, message: 'ID not found' };
+    const rowIndex = finder.getRow();
+    const rowValues = [
+      new Date(),
+      data.date || '',
+      data.category || '',
+      data.subCategory || '',
+      data.item || '',
+      Number(data.amount) || 0,
+      data.email || '',
+      data.shopName || '',
+      data.paymentMode || '',
+      data.labels || '',
+      data.id
+    ];
+    sheet.getRange(rowIndex, 1, 1, 11).setValues([rowValues]);
+    return { success: true, message: 'Expense updated' };
+  }
+
+  if (action === 'delete') {
+    const finder = sheet.createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+    if (!finder) return { success: false, message: 'ID not found' };
+    sheet.deleteRow(finder.getRow());
+    return { success: true, message: 'Expense deleted' };
+  }
+
+  return { success: false, message: 'Invalid action' };
+}
+
+/**
+ * Triggers - run once to set time-based triggers
+ */
+function setupTriggers() {
+  // Remove existing triggers from this project to avoid duplicates
+  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+
+  // Run calculateAllMetrics every 4 hours (customize if needed)
+  ScriptApp.newTrigger('calculateAllMetrics')
+    .timeBased()
+    .everyHours(4)
+    .create();
+
+  // Daily maintenance/check
+  ScriptApp.newTrigger('calculateAllMetrics')
+    .timeBased()
+    .everyDays(1)
+    .create();
+
+  Logger.log('Triggers setup complete');
+}
+
+/**
+ * oneTimeSetup - create sheets & initial rows
+ */
+function oneTimeSetup() {
+  // Create or ensure sheets exist and headers set in settings.gs
+  ensureSheetsExistAndHeaders();
+  // Initialize sample metrics based on settings
+  const settings = getUserSettings();
+  initializeMetrics(settings);
+  // Run initial calculations
+  calculateAllMetrics();
+  Logger.log('One time setup complete');
+}
+
+/**
+ * Helper: minimal test helper to simulate an add + instant metric run
+ */
+function testNotification() {
+  const testExpense = {
+    action: 'add',
+    id: Date.now().toString(),
+    date: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+    category: 'Food',
+    amount: 1500,
+    email: 'test@example.com',
+    item: 'Test Expense',
+    shopName: 'Test Vendor',
+    paymentMode: 'Credit Card',
+    labels: 'Impulse'
+  };
+  handleExpenseAction('add', testExpense);
+  Utilities.sleep(1000);
+  calculateInstantMetrics();
+  const notifs = getNotifications(false);
+  Logger.log('Notifications: ' + JSON.stringify(notifs));
+}
+
+/**
+ * jsonResponse - helper for web responses
+ */
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function debugOneTimeSetup() {
+  try {
+    Logger.log('Starting...');
+    ensureSheetsExistAndHeaders();  // from settings.gs
+    Logger.log('Ensured sheets exist');
+    const settings = getUserSettings();
+    Logger.log('Settings retrieved: ' + JSON.stringify(settings));
+    initializeMetrics(settings);
+    Logger.log('Metrics initialized');
+    calculateAllMetrics();
+    Logger.log('Metrics calculated');
+  } catch (e) {
+    Logger.log('Error in debugOneTimeSetup: ' + e + '\nStack:\n' + e.stack);
+  }
+}
+function setupInsightTrigger() {
+  // Remove existing insight triggers
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'dailyInsightGeneration') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  // Run daily at 9 AM
+  ScriptApp.newTrigger('dailyInsightGeneration')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)
+    .create();
+
+  Logger.log('Daily insight trigger created');
+}
