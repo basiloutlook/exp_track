@@ -27,7 +27,7 @@ export const syncEmitter = new TinyEmitter();
 
 const QUEUE_KEY = 'pendingSyncs';
 const GOOGLE_SHEET_URL =
-  'https://script.google.com/macros/s/AKfycbwXdK1Bh9DrFsOKdMlOpQZEWTQ7AONBhtuneRXY-S8ooD8Uem44eLObwgRl2loLaYMk/exec'; // 🔁 Replace with your deployed Apps Script URL
+  'https://script.google.com/macros/s/AKfycbxQyGH47GOlfuKy5d9aMwNw9LVr9T7OaZDDYYmesglyEBCvDcRDaGg1Nqo2t_rBvZi5/exec'; 
 
 // -----------------------------------------------------------------------------
 // 1️⃣ Add to local queue (non-blocking)

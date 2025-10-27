@@ -22,7 +22,7 @@ import { Filter, Trash2, TrendingUp, Calendar, X, ChevronDown, ChevronUp, ArrowU
 import StatCard from '@/components/StatCard';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 const DateTimePickerModal = require('react-native-modal-datetime-picker').default;
-import { activateKeepAwake, deactivateKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Quarter {
@@ -1647,5 +1647,5 @@ return (
 
 
 if (__DEV__) {
-  activateKeepAwake(); // Only activate in development mode
+ await activateKeepAwakeAsync();; // Only activate in development mode
 }

@@ -3,7 +3,7 @@ import { Expense } from "@/types/expense";
 import { storageService } from "./storage";
 
 const GOOGLE_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbwXdK1Bh9DrFsOKdMlOpQZEWTQ7AONBhtuneRXY-S8ooD8Uem44eLObwgRl2loLaYMk/exec";
+  "https://script.google.com/macros/s/AKfycbxQyGH47GOlfuKy5d9aMwNw9LVr9T7OaZDDYYmesglyEBCvDcRDaGg1Nqo2t_rBvZi5/exec";
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.
@@ -290,5 +290,78 @@ export async function deleteExpenseFromGoogleSheet(id: string): Promise<void> {
   } catch (error) {
     console.error('❌ Error deleting expense from Google Sheet:', error);
     throw error;
+  }
+}
+
+// Add these functions to your existing utils/googleSheets.ts file
+
+/**
+ * Get insights from server that haven't been delivered yet
+ * @param since - Only fetch insights created after this date
+ */
+export async function getInsightsFromServer(since: Date | null = null): Promise<any[]> {
+  try {
+    const params = new URLSearchParams();
+    params.append('mode', 'insights');
+    if (since) {
+      params.append('since', since.toISOString());
+    }
+
+    const url = `${GOOGLE_SHEET_URL}?${params.toString()}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    
+    const insights = await response.json();
+    console.log(`✅ Fetched ${insights.length} insights from server`);
+    return insights;
+  } catch (error) {
+    console.error('❌ Error fetching insights:', error);
+    return [];
+  }
+}
+
+/**
+ * Mark an insight as delivered to the user (in chat)
+ */
+export async function markInsightAsDelivered(insightId: string): Promise<void> {
+  try {
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        action: 'markInsightDelivered', 
+        id: insightId 
+      }),
+    });
+
+    const result = await response.json();
+    if (!result.success) throw new Error(result.message);
+    console.log(`✅ Marked insight as delivered: ${insightId}`);
+  } catch (error) {
+    console.error('❌ Error marking insight as delivered:', error);
+  }
+}
+/**
+ * Trigger insight generation manually from the app
+ */
+export async function triggerInsightGeneration(): Promise<any> {
+  try {
+    const response = await fetch(GOOGLE_SHEET_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'generateInsights' }),
+    });
+
+    const result = await response.json();
+    console.log(`✅ Insight generation triggered:`, result);
+    return result;
+  } catch (error) {
+    console.error('❌ Error triggering insight generation:', error);
+    return { success: false, message: 'Failed to trigger insights' };
   }
 }
