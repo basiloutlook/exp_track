@@ -100,20 +100,39 @@ class ChatHistoryService {
 
       console.log(`Fetched ${serverInsights.length} new insights from server`);
 
-      // Convert server insights to chat messages
-      const insightMessages: ChatMessage[] = serverInsights.map((insight: any) => ({
-        id: `insight-${insight.id || Date.now()}-${Math.random()}`,
-        text: insight.message || insight.description || '',
-        type: 'insight' as MessageType,
-        timestamp: insight.timestamp ? new Date(insight.timestamp) : new Date(),
-        insightData: {
-          insightType: insight.type || 'default',
-          severity: insight.severity || 'low',
-          title: insight.title || 'Insight',
-          category: insight.category || 'general',
-          serverId: insight.id,
-        },
-      }));
+      // Convert server insights to chat messages with validation
+      const insightMessages: ChatMessage[] = serverInsights
+        .filter((insight: any) => {
+          // Filter out invalid insights
+          return insight && (insight.message || insight.description);
+        })
+        .map((insight: any) => {
+          // Normalize severity to valid values
+          let severity = (insight.severity || 'low').toLowerCase();
+          if (!['high', 'medium', 'low', 'positive'].includes(severity)) {
+            severity = 'low';
+          }
+
+          // Normalize type to valid values
+          let type = (insight.type || 'default').toLowerCase();
+          if (!['alert', 'trend', 'positive', 'behavioral'].includes(type)) {
+            type = 'behavioral';
+          }
+
+          return {
+            id: `insight-${insight.id || Date.now()}-${Math.random()}`,
+            text: insight.message || insight.description || 'New insight available',
+            type: 'insight' as MessageType,
+            timestamp: insight.timestamp ? new Date(insight.timestamp) : new Date(),
+            insightData: {
+              insightType: type as 'alert' | 'trend' | 'positive' | 'behavioral',
+              severity: severity as 'high' | 'medium' | 'low' | 'positive',
+              title: insight.title || 'Insight',
+              category: insight.category || 'general',
+              serverId: insight.id,
+            },
+          };
+        });
 
       // Save to chat history
       await this.saveMessages(insightMessages);

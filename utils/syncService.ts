@@ -27,7 +27,7 @@ export const syncEmitter = new TinyEmitter();
 
 const QUEUE_KEY = 'pendingSyncs';
 const GOOGLE_SHEET_URL =
-  'https://script.google.com/macros/s/AKfycbxQyGH47GOlfuKy5d9aMwNw9LVr9T7OaZDDYYmesglyEBCvDcRDaGg1Nqo2t_rBvZi5/exec'; 
+  process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL
 
 // -----------------------------------------------------------------------------
 // 1️⃣ Add to local queue (non-blocking)
@@ -60,6 +60,9 @@ export async function processQueue() {
 
     for (const payload of queue) {
       try {
+        if (!GOOGLE_SHEET_URL) {
+          throw new Error('Google Sheet URL is not defined');
+        }
         const res = await fetch(GOOGLE_SHEET_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -1,5 +1,5 @@
 // app/(tabs)/chatbot.tsx
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,9 +16,8 @@ import { Send, Bot, User, TrendingUp, Sparkles, AlertCircle, CheckCircle, Info }
 import { getChatbotResponse } from '@/utils/chatbotService';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 import { Expense } from '@/types/expense';
-import { chatHistoryService, ChatMessage, MessageType } from '@/utils/chatHistoryService';
+import { chatHistoryService, ChatMessage } from '@/utils/chatHistoryService';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback } from 'react';
 
 const QUICK_QUERIES = [
   "What's my spending trend this month?",
@@ -58,11 +57,15 @@ export default function Chatbot() {
     loadInitialData();
   }, []);
 
-  // Refresh when screen comes into focus
+  // Refresh when screen comes into focus (optimized)
   useFocusEffect(
     useCallback(() => {
-      loadInitialData();
-    }, [])
+      if (!isLoadingHistory && messages.length === 0) {
+        loadInitialData(); // First time only
+      } else if (!isLoadingHistory) {
+        syncNewInsights(); // Just check for new insights
+      }
+    }, [isLoadingHistory, messages.length])
   );
 
   const loadInitialData = async () => {
@@ -75,7 +78,15 @@ export default function Chatbot() {
       // Load chat history (includes user messages, bot responses, AND insights)
       const history = await chatHistoryService.getChatHistory();
       
-      if (history.length === 0) {
+      // Sync new insights from server
+      const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
+      
+      // Reload history if new insights were added
+      const updatedHistory = newInsightsCount > 0 
+        ? await chatHistoryService.getChatHistory() 
+        : history;
+      
+      if (updatedHistory.length === 0) {
         // First time user - add welcome message
         const welcomeMessage: ChatMessage = {
           id: Date.now().toString(),
@@ -86,13 +97,32 @@ export default function Chatbot() {
         await chatHistoryService.saveMessage(welcomeMessage);
         setMessages([welcomeMessage]);
       } else {
-        setMessages(history);
+        setMessages(updatedHistory);
+        
+        // Show notification if new insights were added
+        if (newInsightsCount > 0) {
+          console.log(`✨ ${newInsightsCount} new insight(s) added to chat`);
+        }
       }
     } catch (error) {
       console.error('Error loading initial data:', error);
     } finally {
       setIsLoadingHistory(false);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  };
+
+  const syncNewInsights = async () => {
+    try {
+      const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
+      if (newInsightsCount > 0) {
+        const updatedHistory = await chatHistoryService.getChatHistory();
+        setMessages(updatedHistory);
+        console.log(`✨ ${newInsightsCount} new insight(s) added to chat`);
+        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+      }
+    } catch (error) {
+      console.error('Error syncing insights:', error);
     }
   };
 
@@ -177,7 +207,13 @@ export default function Chatbot() {
     // Auto-generated insight
     if (message.type === 'insight' && message.insightData) {
       const { insightType, severity, title } = message.insightData;
-      const severityStyle = SEVERITY_COLORS[severity || 'low'];
+      
+      // Safety check: Use default severity if invalid
+      const validSeverity = severity && SEVERITY_COLORS[severity] 
+        ? severity 
+        : 'low';
+      
+      const severityStyle = SEVERITY_COLORS[validSeverity];
       const IconComponent = INSIGHT_ICONS[insightType || 'default'];
 
       return (
@@ -185,7 +221,7 @@ export default function Chatbot() {
           <View style={[styles.insightBadge, { backgroundColor: severityStyle.bg, borderColor: severityStyle.border }]}>
             <View style={styles.insightHeader}>
               <IconComponent size={18} color={severityStyle.icon} />
-              <Text style={[styles.insightTitle, { color: severityStyle.text }]}>{title}</Text>
+              <Text style={[styles.insightTitle, { color: severityStyle.text }]}>{title || 'Insight'}</Text>
             </View>
             <Text style={[styles.insightText, { color: severityStyle.text }]}>{message.text}</Text>
             <Text style={[styles.insightTime, { color: severityStyle.text }]}>
@@ -317,21 +353,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+    maxHeight: 60,
   },
   quickQueryContent: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8,
     gap: 8,
   },
   quickQueryButton: {
     backgroundColor: '#f3f4f6',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
     marginRight: 8,
   },
   quickQueryText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#374151',
     fontWeight: '500',
   },
@@ -340,13 +377,13 @@ const styles = StyleSheet.create({
   },
   messagesContent: {
     padding: 16,
-    gap: 12,
+    paddingBottom: 20,
   },
   messageContainer: {
     maxWidth: '85%',
     padding: 12,
     borderRadius: 12,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   userMessage: {
     alignSelf: 'flex-end',
@@ -375,7 +412,7 @@ const styles = StyleSheet.create({
   },
   insightContainer: {
     marginBottom: 12,
-    alignSelf: 'stretch',
+    width: '100%',
   },
   insightBadge: {
     padding: 14,

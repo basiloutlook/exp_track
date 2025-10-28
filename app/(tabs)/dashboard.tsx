@@ -1647,5 +1647,7 @@ return (
 
 
 if (__DEV__) {
- await activateKeepAwakeAsync();; // Only activate in development mode
+  (async () => {
+    await activateKeepAwakeAsync();
+  })();
 }

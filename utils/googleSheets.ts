@@ -2,8 +2,8 @@
 import { Expense } from "@/types/expense";
 import { storageService } from "./storage";
 
-const GOOGLE_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbxQyGH47GOlfuKy5d9aMwNw9LVr9T7OaZDDYYmesglyEBCvDcRDaGg1Nqo2t_rBvZi5/exec";
+const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL!;
+console.log("🔗 Google Sheet URL:", process.env.GOOGLE_SHEET_URL);
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.
@@ -299,6 +299,8 @@ export async function deleteExpenseFromGoogleSheet(id: string): Promise<void> {
  * Get insights from server that haven't been delivered yet
  * @param since - Only fetch insights created after this date
  */
+// Add this to your utils/googleSheets.ts
+
 export async function getInsightsFromServer(since: Date | null = null): Promise<any[]> {
   try {
     const params = new URLSearchParams();
@@ -316,15 +318,29 @@ export async function getInsightsFromServer(since: Date | null = null): Promise<
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     
-    const insights = await response.json();
-    console.log(`✅ Fetched ${insights.length} insights from server`);
-    return insights;
+    const data = await response.json();
+    
+    // Validate data format
+    if (!Array.isArray(data)) {
+      console.warn('⚠️ Invalid data format from server (not an array)');
+      return [];
+    }
+    
+    // Filter out invalid insights
+    const validInsights = data.filter((insight: any) => {
+      return insight && 
+             typeof insight === 'object' && 
+             (insight.message || insight.description) &&
+             insight.id;
+    });
+    
+    console.log(`✅ Fetched ${validInsights.length} valid insights from server`);
+    return validInsights;
   } catch (error) {
     console.error('❌ Error fetching insights:', error);
     return [];
   }
 }
-
 /**
  * Mark an insight as delivered to the user (in chat)
  */
@@ -365,3 +381,4 @@ export async function triggerInsightGeneration(): Promise<any> {
     return { success: false, message: 'Failed to trigger insights' };
   }
 }
+

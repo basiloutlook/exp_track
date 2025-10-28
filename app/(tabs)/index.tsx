@@ -381,24 +381,33 @@ const styles = StyleSheet.create({
 });
 
 // ✅ Delete Expense function (optional)
-const GOOGLE_SHEET_URL =
-  'https://script.google.com/macros/s/AKfycbxQyGH47GOlfuKy5d9aMwNw9LVr9T7OaZDDYYmesglyEBCvDcRDaGg1Nqo2t_rBvZi5/exec';
+const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL
 
 // ✅ Add this helper function after imports or constants
 const sendToGoogle = async (payload: any) => {
   try {
+    if (!GOOGLE_SHEET_URL) {
+      console.warn('GOOGLE_SHEET_URL not set, skipping sendToGoogle');
+      return;
+    }
     await fetch(GOOGLE_SHEET_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    console.warn('Background sync failed:', err);
+    console.error('❌ Error sending to Google Sheet:', err);
+    throw err;
   }
 };
 
+// Delete expense function
 export async function deleteExpenseFromGoogleSheetLocal(id: string): Promise<void> {
   try {
+    if (!GOOGLE_SHEET_URL) {
+      throw new Error('GOOGLE_SHEET_URL is not configured');
+    }
+
     const payload = { action: 'delete', id };
     console.log('📤 Sending DELETE request to Google Sheet:', payload);
 

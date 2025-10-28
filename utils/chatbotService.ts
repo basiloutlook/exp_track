@@ -1,8 +1,8 @@
 // utils/chatbotService.ts
 import { Expense } from '@/types/expense';
 
-const GEMINI_API_KEY = 'AIzaSyAL1XkagjgWES1-9j5Q_1XkZDcxp1WzpBY'; // Add to your environment variables
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Add to your environment variables
+const GEMINI_API_URL = process.env.GEMINI_API_URL;
 
 interface ExpenseAnalytics {
   totalExpenses: number;
