@@ -475,6 +475,16 @@ function processChatbotQuery(query) {
       };
     }
   }
+  // Rerun insight analysis
+  if (lowerQuery.includes('rerun') || lowerQuery.includes('recheck') || lowerQuery.includes('new insights')) {
+    const insights = generateExpenseInsights();
+    storeInsightsAsNotifications(insights);
+
+    return {
+      success: true,
+      response: `I've re-analyzed your recent expenses and generated ${insights.length} insights. You can check them in your Insights tab or notifications.`
+    };
+  }
 
   // Default response
   return {

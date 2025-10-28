@@ -274,6 +274,42 @@ Example insights you can provide:
  */
 export async function getChatbotResponse(userQuery: string, expenses: Expense[]): Promise<string> {
   try {
+
+    // 🧠 Handle manual analysis rerun commands first
+    const lowerQuery = userQuery.toLowerCase();
+
+    if (
+      lowerQuery.includes('rerun') ||
+      lowerQuery.includes('recheck') ||
+      lowerQuery.includes('new insights') ||
+      lowerQuery.includes('refresh insights') ||
+      lowerQuery.includes('check for new insights')
+    ) {
+      const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL;
+      if (!GOOGLE_SHEET_URL) {
+        return "Google Sheet URL is not configured. Please set it in your .env file.";
+      }
+
+      try {
+        const response = await fetch(GOOGLE_SHEET_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'rerunInsights' }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          return `✅ I've re-analyzed your expenses and generated ${data.count || 'new'} insights. You can check them in your Insights tab.`;
+        } else {
+          return `⚠️ Couldn't rerun insights: ${data.message || 'Unknown error.'}`;
+        }
+      } catch (err) {
+        console.error('Error rerunning insights:', err);
+        return "⚠️ Something went wrong while refreshing insights. Please try again later.";
+      }
+    }
+
     // Analyze expenses
     const analytics = analyzeExpenses(expenses);
     
