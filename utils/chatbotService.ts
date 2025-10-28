@@ -1,322 +1,133 @@
 // utils/chatbotService.ts
-import { Expense } from '@/types/expense';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Add to your environment variables
-const GEMINI_API_URL = process.env.GEMINI_API_URL;
+// These are your Gemini API credentials
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY!;
+const GEMINI_API_URL = process.env.EXPO_PUBLIC_GEMINI_API_URL!; 
 
-interface ExpenseAnalytics {
-  totalExpenses: number;
-  categoryBreakdown: Record<string, number>;
-  monthlyTrends: Record<string, number>;
-  weeklyTrends: Record<string, number>;
-  topVendors: Array<{ name: string; amount: number; count: number }>;
-  paymentMethodBreakdown: Record<string, number>;
-  labelBreakdown: Record<string, number>;
-  recentExpenses: Expense[];
-  averages: {
-    daily: number;
-    weekly: number;
-    monthly: number;
-  };
-  spendingPatterns: {
-    peakDays: string[];
-    peakHours: number[];
-    consecutiveDays: number;
-    zeroSpendDays: number;
-  };
+// This is the NEW Web App URL from your deployed Google Apps Script
+const GAS_WEB_APP_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!;
+
+console.log("🔑 GEMINI_API_URL:", GEMINI_API_URL);
+console.log("🔐 GEMINI_API_KEY:", GEMINI_API_KEY ? "Loaded ✅" : "❌ Missing");
+console.log("📈 GAS_WEB_APP_URL:", GAS_WEB_APP_URL ? "Loaded ✅" : "❌ Missing");
+
+// Define the conversation history types
+// (These match the Gemini API structure)
+export interface Content {
+  role: 'user' | 'model' | 'function';
+  parts: Part[];
+}
+
+export interface Part {
+  text?: string;
+  functionCall?: FunctionCall;
+  functionResponse?: FunctionResponse;
+}
+
+export interface FunctionCall {
+  name: string;
+  args: Record<string, any>;
+}
+
+export interface FunctionResponse {
+  name: string;
+  response: Record<string, any>;
 }
 
 /**
- * Analyze expenses and generate comprehensive analytics
+ * ===================================================================
+ * Tool Definition
+ * * This JSON object tells Gemini what functions (tools) it has 
+ * access to. The "name", "description", and "parameters" must
+ * exactly match what your chatbot.gs file expects.
+ * ===================================================================
  */
-function analyzeExpenses(expenses: Expense[]): ExpenseAnalytics {
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+const tools = [
+  {
+    functionDeclarations: [
+      {
+        name: 'get_spending_trend',
+        description: "Get the user's total spending trend for a period, compared to the previous period.",
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            period: {
+              type: 'STRING',
+              description: "The period to check, e.g., 'this_month', 'this_week'. Defaults to 'this_month'.",
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'get_top_categories',
+        description: 'Get the top N spending categories for a given period.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            period: {
+              type: 'STRING',
+              description: "The period to check, e.g., 'this_month'. Defaults to 'this_month'.",
+            },
+            count: {
+              type: 'NUMBER',
+              description: 'The number of categories to return. Defaults to 3.',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'get_category_vs_average',
+        description: "Checks if any spending categories this month are significantly higher than their 3-month average.",
+        parameters: {
+          type: 'OBJECT',
+          properties: {}, // No parameters needed, it always runs for 'this_month'
+          required: [],
+        },
+      },
+      {
+        name: 'get_impulse_purchases',
+        description: 'Get total spending and top categories for items labeled "Impulse" in a given period.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            period: {
+              type: 'STRING',
+              description: "The period to check, e.g., 'this_month'. Defaults to 'this_month'.",
+            },
+          },
+          required: [],
+        },
+      },
+    ],
+  },
+];
 
-  // Filter expenses for current month
-  const currentMonthExpenses = expenses.filter(e => {
-    const expenseDate = new Date(e.date);
-    return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
-  });
-
-  // Calculate totals
-  const totalExpenses = currentMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
-
-  // Category breakdown
-  const categoryBreakdown: Record<string, number> = {};
-  currentMonthExpenses.forEach(e => {
-    categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + e.amount;
-  });
-
-  // Monthly trends (last 6 months)
-  const monthlyTrends: Record<string, number> = {};
-  for (let i = 0; i < 6; i++) {
-    const targetMonth = new Date(currentYear, currentMonth - i, 1);
-    const monthKey = targetMonth.toLocaleString('default', { month: 'short', year: 'numeric' });
-    const monthExpenses = expenses.filter(e => {
-      const expenseDate = new Date(e.date);
-      return expenseDate.getMonth() === targetMonth.getMonth() && 
-             expenseDate.getFullYear() === targetMonth.getFullYear();
-    });
-    monthlyTrends[monthKey] = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
-  }
-
-  // Weekly trends (last 4 weeks)
-  const weeklyTrends: Record<string, number> = {};
-  for (let i = 0; i < 4; i++) {
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - (i * 7));
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-    
-    const weekKey = `Week ${4 - i}`;
-    const weekExpenses = currentMonthExpenses.filter(e => {
-      const expenseDate = new Date(e.date);
-      return expenseDate >= weekStart && expenseDate <= weekEnd;
-    });
-    weeklyTrends[weekKey] = weekExpenses.reduce((sum, e) => sum + e.amount, 0);
-  }
-
-  // Top vendors
-  const vendorMap: Record<string, { amount: number; count: number }> = {};
-  currentMonthExpenses.forEach(e => {
-    if (e.shopName) {
-      if (!vendorMap[e.shopName]) {
-        vendorMap[e.shopName] = { amount: 0, count: 0 };
-      }
-      vendorMap[e.shopName].amount += e.amount;
-      vendorMap[e.shopName].count += 1;
-    }
-  });
-  const topVendors = Object.entries(vendorMap)
-    .map(([name, data]) => ({ name, ...data }))
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 5);
-
-  // Payment method breakdown
-  const paymentMethodBreakdown: Record<string, number> = {};
-  currentMonthExpenses.forEach(e => {
-    paymentMethodBreakdown[e.paymentMode] = (paymentMethodBreakdown[e.paymentMode] || 0) + e.amount;
-  });
-
-  // Label breakdown
-  const labelBreakdown: Record<string, number> = {};
-  currentMonthExpenses.forEach(e => {
-    if (e.labels && Array.isArray(e.labels)) {
-      e.labels.forEach(label => {
-        labelBreakdown[label] = (labelBreakdown[label] || 0) + e.amount;
-      });
-    }
-  });
-
-  // Recent expenses
-  const recentExpenses = [...currentMonthExpenses]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 10);
-
-  // Calculate averages
-  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-  const currentDayOfMonth = now.getDate();
-  const dailyAverage = totalExpenses / currentDayOfMonth;
-  const weeklyAverage = totalExpenses / (currentDayOfMonth / 7);
-  const monthlyAverage = expenses
-    .filter(e => {
-      const expenseDate = new Date(e.date);
-      return expenseDate.getFullYear() === currentYear;
-    })
-    .reduce((sum, e) => sum + e.amount, 0) / (currentMonth + 1);
-
-  // Spending patterns
-  const dayMap: Record<string, number> = {};
-  const hourMap: Record<number, number> = {};
-  const dateSet = new Set<string>();
+/**
+ * ===================================================================
+ * NEW getChatbotResponse - The Orchestrator
+ * * This function now manages the multi-step tool-use flow.
+ * It NO LONGER takes the `expenses` array.
+ * ===================================================================
+ */
+export async function getChatbotResponse(
+  userQuery: string,
+  chatHistory: Content[] // Pass the existing chat history
+): Promise<{ newHistory: Content[]; responseText: string }> {
   
-  currentMonthExpenses.forEach(e => {
-    const expenseDate = new Date(e.date);
-    const dayName = expenseDate.toLocaleDateString('en-US', { weekday: 'long' });
-    const hour = expenseDate.getHours();
-    const dateKey = expenseDate.toDateString();
-    
-    dayMap[dayName] = (dayMap[dayName] || 0) + 1;
-    hourMap[hour] = (hourMap[hour] || 0) + 1;
-    dateSet.add(dateKey);
-  });
-
-  const peakDays = Object.entries(dayMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 2)
-    .map(([day]) => day);
-
-  const peakHours = Object.entries(hourMap)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 2)
-    .map(([hour]) => parseInt(hour));
-
-  // Calculate consecutive spending days
-  const sortedDates = Array.from(dateSet).sort();
-  let consecutiveDays = 0;
-  let currentStreak = 1;
-  for (let i = 1; i < sortedDates.length; i++) {
-    const prevDate = new Date(sortedDates[i - 1]);
-    const currDate = new Date(sortedDates[i]);
-    const diffDays = Math.floor((currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 1) {
-      currentStreak++;
-      consecutiveDays = Math.max(consecutiveDays, currentStreak);
-    } else {
-      currentStreak = 1;
-    }
-  }
-
-  const zeroSpendDays = currentDayOfMonth - dateSet.size;
-
-  return {
-    totalExpenses,
-    categoryBreakdown,
-    monthlyTrends,
-    weeklyTrends,
-    topVendors,
-    paymentMethodBreakdown,
-    labelBreakdown,
-    recentExpenses,
-    averages: {
-      daily: dailyAverage,
-      weekly: weeklyAverage,
-      monthly: monthlyAverage,
-    },
-    spendingPatterns: {
-      peakDays,
-      peakHours,
-      consecutiveDays,
-      zeroSpendDays,
-    },
+  const systemPrompt: Part = {
+    text: "You are an expert financial advisor. Analyze the user's spending data from their Google Sheet by using the provided tools. Be conversational, precise, and provide actionable insights. Always use the tools to get data before answering. If a query is vague (e.g., 'am I doing good?'), ask for clarification or use a tool (like 'get_spending_trend') to provide a data-backed starting point."
   };
-}
 
-/**
- * Build system prompt with analytics context
- */
-function buildSystemPrompt(analytics: ExpenseAnalytics): string {
-  return `You are an AI expense assistant analyzing user spending data. Be helpful, insightful, and conversational.
+  // 1. Add the user's new message to the history
+  const historyWithUserQuery: Content[] = [
+    ...chatHistory,
+    { role: 'user', parts: [{ text: userQuery }] },
+  ];
 
-**Current Context:**
-- Total Expenses This Month: ₹${analytics.totalExpenses.toFixed(2)}
-- Daily Average: ₹${analytics.averages.daily.toFixed(2)}
-- Weekly Average: ₹${analytics.averages.weekly.toFixed(2)}
-- Monthly Average: ₹${analytics.averages.monthly.toFixed(2)}
-
-**Category Breakdown:**
-${Object.entries(analytics.categoryBreakdown)
-  .sort((a, b) => b[1] - a[1])
-  .map(([cat, amt]) => `- ${cat}: ₹${amt.toFixed(2)}`)
-  .join('\n')}
-
-**Monthly Trends:**
-${Object.entries(analytics.monthlyTrends)
-  .map(([month, amt]) => `- ${month}: ₹${amt.toFixed(2)}`)
-  .join('\n')}
-
-**Weekly Trends:**
-${Object.entries(analytics.weeklyTrends)
-  .map(([week, amt]) => `- ${week}: ₹${amt.toFixed(2)}`)
-  .join('\n')}
-
-**Top Vendors:**
-${analytics.topVendors.map(v => `- ${v.name}: ₹${v.amount.toFixed(2)} (${v.count} transactions)`).join('\n')}
-
-**Payment Methods:**
-${Object.entries(analytics.paymentMethodBreakdown)
-  .sort((a, b) => b[1] - a[1])
-  .map(([method, amt]) => `- ${method}: ₹${amt.toFixed(2)}`)
-  .join('\n')}
-
-**Labels/Tags:**
-${Object.entries(analytics.labelBreakdown)
-  .sort((a, b) => b[1] - a[1])
-  .map(([label, amt]) => `- ${label}: ₹${amt.toFixed(2)}`)
-  .join('\n')}
-
-**Spending Patterns:**
-- Peak spending days: ${analytics.spendingPatterns.peakDays.join(', ')}
-- Peak spending hours: ${analytics.spendingPatterns.peakHours.map(h => `${h}:00`).join(', ')}
-- Consecutive spending days: ${analytics.spendingPatterns.consecutiveDays}
-- Zero-spend days this month: ${analytics.spendingPatterns.zeroSpendDays}
-
-**Recent Transactions (Last 10):**
-${analytics.recentExpenses.slice(0, 5).map(e => 
-  `- ${e.item} (${e.category}): ₹${e.amount} on ${new Date(e.date).toLocaleDateString()}`
-).join('\n')}
-
-**Instructions:**
-1. Answer questions about spending patterns, trends, and insights
-2. Provide actionable recommendations when appropriate
-3. Detect unusual patterns (spikes, frequent vendors, impulse purchases)
-4. Compare current spending with averages and past periods
-5. Be conversational but precise with numbers
-6. Format currency as ₹X.XX
-7. Keep responses concise (3-5 sentences max unless detailed analysis requested)
-8. Proactively highlight concerning patterns or positive behaviors
-
-Example insights you can provide:
-- Spending alerts (exceeding averages)
-- Category comparisons
-- Vendor frequency analysis
-- Payment method preferences
-- Label-based summaries (e.g., "Impulse" expenses)
-- Trend analysis (increasing/decreasing)
-- Zero-spend streak encouragement`;
-}
-
-/**
- * Call Gemini API with expense context
- */
-export async function getChatbotResponse(userQuery: string, expenses: Expense[]): Promise<string> {
   try {
-
-    // 🧠 Handle manual analysis rerun commands first
-    const lowerQuery = userQuery.toLowerCase();
-
-    if (
-      lowerQuery.includes('rerun') ||
-      lowerQuery.includes('recheck') ||
-      lowerQuery.includes('new insights') ||
-      lowerQuery.includes('refresh insights') ||
-      lowerQuery.includes('check for new insights')
-    ) {
-      const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL;
-      if (!GOOGLE_SHEET_URL) {
-        return "Google Sheet URL is not configured. Please set it in your .env file.";
-      }
-
-      try {
-        const response = await fetch(GOOGLE_SHEET_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'rerunInsights' }),
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-          return `✅ I've re-analyzed your expenses and generated ${data.count || 'new'} insights. You can check them in your Insights tab.`;
-        } else {
-          return `⚠️ Couldn't rerun insights: ${data.message || 'Unknown error.'}`;
-        }
-      } catch (err) {
-        console.error('Error rerunning insights:', err);
-        return "⚠️ Something went wrong while refreshing insights. Please try again later.";
-      }
-    }
-
-    // Analyze expenses
-    const analytics = analyzeExpenses(expenses);
-    
-    // Build system prompt with context
-    const systemPrompt = buildSystemPrompt(analytics);
-    
-    // Call Gemini API
+    // 2. === FIRST GEMINI CALL: Check for Tool Use ===
     const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
@@ -324,18 +135,14 @@ export async function getChatbotResponse(userQuery: string, expenses: Expense[])
       },
       body: JSON.stringify({
         contents: [
-          {
-            parts: [
-              { text: systemPrompt },
-              { text: `User Question: ${userQuery}` },
-            ],
-          },
+          // Send system prompt ONLY if history is empty
+          ...(chatHistory.length === 0 ? [{ role: 'user' as const, parts: [systemPrompt] }, { role: 'model' as const, parts: [{ text: "Understood. I am ready to help you analyze your expenses. What would you like to know?"}] }] : []),
+          ...historyWithUserQuery
         ],
+        tools: tools,
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 500,
-          topP: 0.8,
-          topK: 40,
+          maxOutputTokens: 1000,
         },
       }),
     });
@@ -345,53 +152,144 @@ export async function getChatbotResponse(userQuery: string, expenses: Expense[])
     }
 
     const data = await response.json();
-    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || 
-                          "I couldn't generate a response. Please try again.";
+    const modelResponsePart = data.candidates?.[0]?.content?.parts?.[0];
 
-    return generatedText;
+    if (!modelResponsePart) {
+      throw new Error("Invalid response from Gemini.");
+    }
+
+    // 3. === DECISION: Is it a Tool Call or a Text Response? ===
+
+    if (modelResponsePart.functionCall) {
+      // --- CASE A: GEMINI WANTS TO USE A TOOL ---
+      const functionCall = modelResponsePart.functionCall as FunctionCall;
+      console.log('Gemini requested tool call:', functionCall.name, functionCall.args);
+
+      // Add Gemini's function call to history
+      const historyWithFunctionCall: Content[] = [
+        ...historyWithUserQuery,
+        { role: 'model', parts: [{ functionCall: functionCall }] }
+      ];
+
+      // 4. --- EXECUTE THE TOOL (Call Google Apps Script) ---
+      const toolResult = await callGoogleAppsScript(functionCall);
+
+      // 5. --- SECOND GEMINI CALL: Send Tool Result Back ---
+      const finalResponse = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            // Send the *entire* history again, now with the function response
+            ...(chatHistory.length === 0 ? [{ role: 'user' as const, parts: [systemPrompt] }, { role: 'model' as const, parts: [{ text: "Understood. I am ready to help you analyze your expenses. What would you like to know?"}] }] : []),
+            ...historyWithFunctionCall,
+            {
+              role: 'function',
+              parts: [{
+                functionResponse: {
+                  name: functionCall.name,
+                  response: toolResult,
+                }
+              }]
+            }
+          ],
+          tools: tools, // Send tools again
+        }),
+      });
+
+      if (!finalResponse.ok) {
+        throw new Error(`Gemini API error (step 2): ${finalResponse.status}`);
+      }
+
+      const finalData = await finalResponse.json();
+      const finalResponseText = finalData.candidates?.[0]?.content?.parts?.[0]?.text || "I found the data, but couldn't formulate a response.";
+      
+      // Return the complete new history and the final text
+      return {
+        newHistory: [
+          ...historyWithFunctionCall,
+          { role: 'function', parts: [{ functionResponse: { name: functionCall.name, response: toolResult } }] },
+          { role: 'model', parts: [{ text: finalResponseText }] }
+        ],
+        responseText: finalResponseText,
+      };
+
+    } else if (modelResponsePart.text) {
+      // --- CASE B: GEMINI GAVE A TEXT RESPONSE ---
+      // (e.g., "Hello!", or "Which category are you asking about?")
+      const responseText = modelResponsePart.text;
+      
+      return {
+        newHistory: [
+          ...historyWithUserQuery,
+          { role: 'model', parts: [{ text: responseText }] }
+        ],
+        responseText: responseText,
+      };
+    } else {
+      throw new Error("No valid response part (text or functionCall) found.");
+    }
+
   } catch (error) {
     console.error('Chatbot error:', error);
-    
-    // Fallback to rule-based responses
-    return generateFallbackResponse(userQuery, expenses);
+    const fallbackText = "I'm having trouble connecting to my data. Please try again in a moment.";
+    return {
+      newHistory: [
+        ...historyWithUserQuery,
+        { role: 'model', parts: [{ text: fallbackText }] }
+      ],
+      responseText: fallbackText,
+    };
   }
 }
 
 /**
- * Fallback rule-based responses when API fails
+ * Helper function to call your Google Apps Script Web App
  */
-function generateFallbackResponse(query: string, expenses: Expense[]): string {
-  const analytics = analyzeExpenses(expenses);
-  const lowerQuery = query.toLowerCase();
+// utils/chatbotService.ts
 
-  if (lowerQuery.includes('total') || lowerQuery.includes('spent')) {
-    return `This month, you've spent ₹${analytics.totalExpenses.toFixed(2)} across ${Object.keys(analytics.categoryBreakdown).length} categories. Your daily average is ₹${analytics.averages.daily.toFixed(2)}.`;
-  }
+/**
+ * Helper function to call your Google Apps Script Web App
+ */
+async function callGoogleAppsScript(functionCall: FunctionCall): Promise<Record<string, any>> {
+  try {
+    const response = await fetch(GAS_WEB_APP_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ functionCall }),
+      redirect: 'follow',
+    });
 
-  if (lowerQuery.includes('category') || lowerQuery.includes('categories')) {
-    const topCategory = Object.entries(analytics.categoryBreakdown)
-      .sort((a, b) => b[1] - a[1])[0];
-    return `Your top spending category is ${topCategory[0]} with ₹${topCategory[1].toFixed(2)}. Other major categories include: ${Object.entries(analytics.categoryBreakdown)
-      .sort((a, b) => b[1] - a[1])
-      .slice(1, 3)
-      .map(([cat, amt]) => `${cat} (₹${amt.toFixed(2)})`)
-      .join(', ')}.`;
-  }
+    if (!response.ok) {
+      throw new Error(`Google Apps Script error: ${response.status} ${response.statusText}`);
+    }
 
-  if (lowerQuery.includes('trend') || lowerQuery.includes('pattern')) {
-    const months = Object.entries(analytics.monthlyTrends);
-    const lastMonth = months[1];
-    const currentMonth = months[0];
-    const change = currentMonth[1] - lastMonth[1];
-    const percentChange = ((change / lastMonth[1]) * 100).toFixed(1);
+    const data = await response.json();
     
-    return `Compared to ${lastMonth[0]}, your spending is ${change > 0 ? 'up' : 'down'} by ${Math.abs(parseFloat(percentChange))}% (₹${Math.abs(change).toFixed(2)}). You typically spend most on ${analytics.spendingPatterns.peakDays.join(' and ')}.`;
-  }
+    if (data.success === false) {
+      throw new Error(`Google Apps Script logical error: ${data.error}`);
+    }
 
-  if (lowerQuery.includes('impulse')) {
-    const impulseAmount = analytics.labelBreakdown['Impulse'] || 0;
-    return `Your impulse purchases this month total ₹${impulseAmount.toFixed(2)}. ${impulseAmount > analytics.averages.weekly ? 'This is higher than your weekly average - consider budgeting for these expenses.' : 'Great job keeping impulse spending under control!'}`;
-  }
+    console.log('Received data from GAS:', data);
+    return data;
 
-  return `I found ${expenses.length} total transactions. This month you've spent ₹${analytics.totalExpenses.toFixed(2)}. Your top category is ${Object.entries(analytics.categoryBreakdown).sort((a, b) => b[1] - a[1])[0][0]}. Ask me about trends, categories, or specific insights!`;
+  } catch (error) {
+    console.error('Error calling Google Apps Script:', error);
+
+    // --- THIS IS THE FIX ---
+    // Handle the 'unknown' error type
+    let errorMessage = "An unknown error occurred while calling Google Apps Script.";
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
+    // -----------------------
+
+    return { success: false, error: errorMessage };
+  }
 }

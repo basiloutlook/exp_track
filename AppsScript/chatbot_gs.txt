@@ -1,414 +1,6 @@
-/*******************************************************
- * chatbot.gs - Google Apps Script Chatbot Backend
- * Add this to your existing Apps Script project
- *******************************************************/
-
 /**
- * Generate intelligent insights from expense data
- * Called by app or can be triggered periodically
- */
-function generateExpenseInsights() {
-  const sheet = getSheet(SHEETS.EXPENSES);
-  if (!sheet) return [];
-
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const rows = data.slice(1);
-
-  // Parse expenses
-  const expenses = rows.map(row => {
-    const obj = {};
-    headers.forEach((header, idx) => {
-      obj[header] = row[idx];
-    });
-    return obj;
-  });
-
-  const insights = [];
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-
-  // Filter current month expenses
-  const currentMonthExpenses = expenses.filter(e => {
-    const expenseDate = new Date(e.Date);
-    return expenseDate.getMonth() === currentMonth && 
-           expenseDate.getFullYear() === currentYear;
-  });
-
-  // Calculate metrics
-  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-  const avgDaily = totalSpent / now.getDate();
-  
-  // Category analysis
-  const categoryMap = {};
-  currentMonthExpenses.forEach(e => {
-    const cat = e.Category || 'Uncategorized';
-    categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
-  });
-
-  const topCategory = Object.entries(categoryMap)
-    .sort((a, b) => b[1] - a[1])[0];
-
-  // Weekly comparison
-  const weekAgo = new Date(now);
-  weekAgo.setDate(now.getDate() - 7);
-  const lastWeekExpenses = currentMonthExpenses.filter(e => {
-    const expenseDate = new Date(e.Date);
-    return expenseDate >= weekAgo && expenseDate <= now;
-  });
-  const lastWeekTotal = lastWeekExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-
-  const twoWeeksAgo = new Date(now);
-  twoWeeksAgo.setDate(now.getDate() - 14);
-  const prevWeekExpenses = currentMonthExpenses.filter(e => {
-    const expenseDate = new Date(e.Date);
-    return expenseDate >= twoWeeksAgo && expenseDate < weekAgo;
-  });
-  const prevWeekTotal = prevWeekExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-
-  // Generate insights
-  
-  // 1. Daily spending alert
-  const todayExpenses = currentMonthExpenses.filter(e => {
-    const expenseDate = new Date(e.Date);
-    return expenseDate.toDateString() === now.toDateString();
-  });
-  const todayTotal = todayExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-  
-  if (todayTotal > avgDaily * 1.5) {
-    insights.push({
-      type: 'alert',
-      category: 'spending',
-      title: 'High Spending Alert',
-      message: `Today's spending (₹${todayTotal.toFixed(2)}) is ${((todayTotal / avgDaily - 1) * 100).toFixed(0)}% above your daily average (₹${avgDaily.toFixed(2)})`,
-      severity: 'high',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // 2. Weekly comparison
-  if (prevWeekTotal > 0) {
-    const weekChange = ((lastWeekTotal - prevWeekTotal) / prevWeekTotal) * 100;
-    if (Math.abs(weekChange) > 20) {
-      insights.push({
-        type: 'trend',
-        category: 'weekly',
-        title: weekChange > 0 ? 'Weekly Spending Increased' : 'Weekly Spending Decreased',
-        message: `This week's spending (₹${lastWeekTotal.toFixed(2)}) is ${Math.abs(weekChange).toFixed(0)}% ${weekChange > 0 ? 'higher' : 'lower'} than last week (₹${prevWeekTotal.toFixed(2)})`,
-        severity: weekChange > 0 ? 'medium' : 'low',
-        timestamp: new Date().toISOString()
-      });
-    }
-  }
-
-  // 3. Category overspending
-  if (topCategory && topCategory[1] > totalSpent * 0.4) {
-    insights.push({
-      type: 'alert',
-      category: 'category',
-      title: `${topCategory[0]} Dominates Spending`,
-      message: `${topCategory[0]} accounts for ${((topCategory[1] / totalSpent) * 100).toFixed(0)}% of your monthly spending (₹${topCategory[1].toFixed(2)})`,
-      severity: 'medium',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // 4. Impulse purchase detection
-  const impulseExpenses = currentMonthExpenses.filter(e => {
-    const labels = e.Labels || '';
-    return labels.toLowerCase().includes('impulse');
-  });
-  const impulseTotal = impulseExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-  
-  if (impulseTotal > totalSpent * 0.15) {
-    insights.push({
-      type: 'behavioral',
-      category: 'impulse',
-      title: 'High Impulse Spending',
-      message: `Impulse purchases (₹${impulseTotal.toFixed(2)}) represent ${((impulseTotal / totalSpent) * 100).toFixed(0)}% of your spending. Consider setting a budget for discretionary expenses.`,
-      severity: 'medium',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // 5. Vendor frequency analysis
-  const vendorMap = {};
-  currentMonthExpenses.forEach(e => {
-    const vendor = e['Shop/Site/Person name'] || 'Unknown';
-    if (vendor !== 'Unknown') {
-      vendorMap[vendor] = (vendorMap[vendor] || 0) + 1;
-    }
-  });
-  
-  const frequentVendors = Object.entries(vendorMap)
-    .filter(([_, count]) => count >= 5)
-    .sort((a, b) => b[1] - a[1]);
-  
-  if (frequentVendors.length > 0) {
-    const topVendor = frequentVendors[0];
-    insights.push({
-      type: 'behavioral',
-      category: 'vendor',
-      title: 'Frequent Vendor Alert',
-      message: `You've made ${topVendor[1]} transactions at ${topVendor[0]} this month. Consider bulk purchasing or subscription options for savings.`,
-      severity: 'low',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // 6. Payment method analysis
-  const paymentMap = {};
-  currentMonthExpenses.forEach(e => {
-    const method = e['Mode of payment'] || 'Unknown';
-    paymentMap[method] = (paymentMap[method] || 0) + parseFloat(e.Amount || 0);
-  });
-  
-  const paymentEntries = Object.entries(paymentMap);
-  if (paymentEntries.length > 0) {
-    const topPayment = paymentEntries.sort((a, b) => b[1] - a[1])[0];
-    const percentage = (topPayment[1] / totalSpent) * 100;
-    
-    if (percentage > 70) {
-      insights.push({
-        type: 'behavioral',
-        category: 'payment',
-        title: 'Payment Method Preference',
-        message: `${topPayment[0]} accounts for ${percentage.toFixed(0)}% (₹${topPayment[1].toFixed(2)}) of your spending. Ensure you're maximizing rewards and cashback.`,
-        severity: 'low',
-        timestamp: new Date().toISOString()
-      });
-    }
-  }
-
-  // 7. Zero-spend streak detection
-  const dateSet = new Set();
-  currentMonthExpenses.forEach(e => {
-    const expenseDate = new Date(e.Date);
-    dateSet.add(expenseDate.toDateString());
-  });
-  
-  const zeroSpendDays = now.getDate() - dateSet.size;
-  if (zeroSpendDays >= 3) {
-    insights.push({
-      type: 'positive',
-      category: 'savings',
-      title: 'Great Saving Streak!',
-      message: `You've had ${zeroSpendDays} zero-spend days this month. Keep up the excellent financial discipline!`,
-      severity: 'low',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // 8. Spending burst detection (multiple transactions in short time)
-  const timeMap = {};
-  currentMonthExpenses.forEach(e => {
-    const timestamp = e.Timestamp;
-    if (timestamp) {
-      const hour = new Date(timestamp).getHours();
-      const dateKey = new Date(timestamp).toDateString();
-      const key = `${dateKey}-${hour}`;
-      timeMap[key] = (timeMap[key] || 0) + 1;
-    }
-  });
-  
-  const bursts = Object.entries(timeMap).filter(([_, count]) => count >= 3);
-  if (bursts.length > 0) {
-    insights.push({
-      type: 'behavioral',
-      category: 'pattern',
-      title: 'Spending Burst Detected',
-      message: `You made ${bursts[0][1]} transactions within an hour on ${bursts[0][0].split('-')[0]}. This might indicate emotional spending or shopping sprees.`,
-      severity: 'medium',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // 9. Month-on-month comparison
-  const lastMonth = new Date(currentYear, currentMonth - 1, 1);
-  const lastMonthExpenses = expenses.filter(e => {
-    const expenseDate = new Date(e.Date);
-    return expenseDate.getMonth() === lastMonth.getMonth() && 
-           expenseDate.getFullYear() === lastMonth.getFullYear();
-  });
-  const lastMonthTotal = lastMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-  
-  if (lastMonthTotal > 0) {
-    const monthChange = ((totalSpent - lastMonthTotal) / lastMonthTotal) * 100;
-    if (Math.abs(monthChange) > 15) {
-      insights.push({
-        type: 'trend',
-        category: 'monthly',
-        title: monthChange > 0 ? 'Monthly Spending Up' : 'Monthly Spending Down',
-        message: `Your spending this month (₹${totalSpent.toFixed(2)}) is ${Math.abs(monthChange).toFixed(0)}% ${monthChange > 0 ? 'higher' : 'lower'} than last month (₹${lastMonthTotal.toFixed(2)})`,
-        severity: monthChange > 0 ? 'medium' : 'low',
-        timestamp: new Date().toISOString()
-      });
-    }
-  }
-
-  // 10. Peak spending time analysis
-  const hourMap = {};
-  currentMonthExpenses.forEach(e => {
-    if (e.Timestamp) {
-      const hour = new Date(e.Timestamp).getHours();
-      hourMap[hour] = (hourMap[hour] || 0) + 1;
-    }
-  });
-  
-  if (Object.keys(hourMap).length > 0) {
-    const peakHour = Object.entries(hourMap)
-      .sort((a, b) => b[1] - a[1])[0];
-    
-    insights.push({
-      type: 'behavioral',
-      category: 'timing',
-      title: 'Peak Spending Time',
-      message: `Most of your transactions (${peakHour[1]}) occur around ${peakHour[0]}:00. Being aware of your spending patterns can help with budgeting.`,
-      severity: 'low',
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  return insights;
-}
-
-
-/**
- * Store insights as notifications
- */
-function storeInsightsAsNotifications(insights) {
-  const notifSheet = getSheet(SHEETS.NOTIFICATIONS);
-  if (!notifSheet) return;
-
-  insights.forEach(insight => {
-    const id = `insight-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const row = [
-      id,
-      insight.title,
-      insight.message,
-      insight.type,
-      insight.category,
-      insight.severity,
-      'unread',         // status
-      'active',         // visibility
-      new Date().toISOString(), // createdAt
-      '',               // dismissedAt
-      'pending'         // deliveryStatus: 'pending', 'delivered', 'failed'
-    ];
-    notifSheet.appendRow(row);
-  });
-}
-
-function getUndeliveredInsights(sinceDate) {
-  const notifSheet = getSheet(SHEETS.NOTIFICATIONS);
-  if (!notifSheet) {
-    Logger.log('Notification sheet not found');
-    return [];
-  }
-
-  const data = notifSheet.getDataRange().getValues();
-  if (data.length <= 1) {
-    Logger.log('No insights to deliver');
-    return [];
-  }
-
-  const headers = data[0];
-  const rows = data.slice(1);
-
-  // Find column indices
-  const idIdx = headers.indexOf('ID');
-  const titleIdx = headers.indexOf('Title');
-  const messageIdx = headers.indexOf('Message');
-  const typeIdx = headers.indexOf('Type');
-  const categoryIdx = headers.indexOf('Category');
-  const severityIdx = headers.indexOf('Severity');
-  const createdAtIdx = headers.indexOf('CreatedAt');
-  const deliveryStatusIdx = headers.indexOf('DeliveryStatus');
-
-  // Validate that all required columns exist
-  if (idIdx === -1 || titleIdx === -1 || messageIdx === -1 || deliveryStatusIdx === -1) {
-    Logger.log('ERROR: Missing required columns in Notification sheet');
-    return [];
-  }
-
-  const insights = [];
-  
-  rows.forEach(row => {
-    try {
-      const deliveryStatus = row[deliveryStatusIdx] || 'pending';
-      const createdAt = row[createdAtIdx] ? new Date(row[createdAtIdx]) : null;
-      
-      // Filter: only pending insights
-      if (deliveryStatus !== 'pending') return;
-      
-      // Filter by date if provided
-      if (sinceDate && createdAt && createdAt <= sinceDate) return;
-      
-      // Validate required fields
-      const id = row[idIdx];
-      const message = row[messageIdx];
-      
-      if (!id || !message) return; // Skip invalid rows
-      
-      // Normalize severity
-      let severity = (row[severityIdx] || 'low').toLowerCase();
-      if (!['high', 'medium', 'low', 'positive'].includes(severity)) {
-        severity = 'low';
-      }
-      
-      // Normalize type
-      let type = (row[typeIdx] || 'behavioral').toLowerCase();
-      if (!['alert', 'trend', 'positive', 'behavioral'].includes(type)) {
-        type = 'behavioral';
-      }
-      
-      insights.push({
-        id: id,
-        title: row[titleIdx] || 'Insight',
-        message: message,
-        type: type,
-        category: row[categoryIdx] || 'general',
-        severity: severity,
-        timestamp: createdAt ? createdAt.toISOString() : new Date().toISOString()
-      });
-    } catch (error) {
-      Logger.log('Error processing insight row: ' + error);
-    }
-  });
-
-  Logger.log(`Returning ${insights.length} undelivered insights`);
-  return insights;
-}
-
-/**
- * Mark insight as delivered in chat
- */
-function markInsightAsDelivered(insightId) {
-  const notifSheet = getSheet(SHEETS.NOTIFICATIONS);
-  if (!notifSheet) return { success: false, message: 'Sheet not found' };
-
-  const data = notifSheet.getDataRange().getValues();
-  const headers = data[0];
-  const idIdx = headers.indexOf('ID');
-  const deliveryStatusIdx = headers.indexOf('DeliveryStatus');
-
-  if (idIdx === -1 || deliveryStatusIdx === -1) {
-    return { success: false, message: 'Column not found' };
-  }
-
-  // Find the row with this insight ID
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][idIdx] === insightId) {
-      notifSheet.getRange(i + 1, deliveryStatusIdx + 1).setValue('delivered');
-      return { success: true, message: 'Insight marked as delivered' };
-    }
-  }
-
-  return { success: false, message: 'Insight not found' };
-}
-/**
- * Chatbot query endpoint - process natural language queries
+ * IMPROVED processChatbotQuery - Much smarter query handling
+ * Replace your existing function with this
  */
 function processChatbotQuery(query) {
   const sheet = getSheet(SHEETS.EXPENSES);
@@ -427,22 +19,174 @@ function processChatbotQuery(query) {
     return obj;
   });
 
-  // Simple rule-based response (you can enhance with AI)
   const lowerQuery = query.toLowerCase();
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
+  // Filter current month expenses
   const currentMonthExpenses = expenses.filter(e => {
     const expenseDate = new Date(e.Date);
     return expenseDate.getMonth() === currentMonth && 
            expenseDate.getFullYear() === currentYear;
   });
 
-  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+  // ===========================================
+  // 1. CATEGORY VS 3-MONTH AVERAGE COMPARISON
+  // ===========================================
+  if ((lowerQuery.includes('category') || lowerQuery.includes('categories')) && 
+      (lowerQuery.includes('higher') || lowerQuery.includes('above') || lowerQuery.includes('exceed')) && 
+      (lowerQuery.includes('average') || lowerQuery.includes('avg'))) {
+    
+    // Current month category totals
+    const currentCategoryTotals = {};
+    currentMonthExpenses.forEach(e => {
+      const cat = e.Category || 'Uncategorized';
+      currentCategoryTotals[cat] = (currentCategoryTotals[cat] || 0) + parseFloat(e.Amount || 0);
+    });
 
-  // Category analysis
-  if (lowerQuery.includes('category') || lowerQuery.includes('categories')) {
+    // Last 3 months category totals
+    const last3MonthsCategoryData = {};
+    for (let i = 1; i <= 3; i++) {
+      const targetMonth = new Date(currentYear, currentMonth - i, 1);
+      const monthExpenses = expenses.filter(e => {
+        const d = new Date(e.Date);
+        return d.getMonth() === targetMonth.getMonth() && 
+               d.getFullYear() === targetMonth.getFullYear();
+      });
+      
+      monthExpenses.forEach(e => {
+        const cat = e.Category || 'Uncategorized';
+        if (!last3MonthsCategoryData[cat]) {
+          last3MonthsCategoryData[cat] = [];
+        }
+        last3MonthsCategoryData[cat].push(parseFloat(e.Amount || 0));
+      });
+    }
+
+    // Calculate 3-month averages per category
+    const categoryAverages = {};
+    Object.keys(last3MonthsCategoryData).forEach(cat => {
+      const amounts = last3MonthsCategoryData[cat];
+      const monthTotals = {};
+      
+      // Group by month
+      for (let i = 1; i <= 3; i++) {
+        const targetMonth = new Date(currentYear, currentMonth - i, 1);
+        const monthKey = `${targetMonth.getMonth()}-${targetMonth.getFullYear()}`;
+        monthTotals[monthKey] = 0;
+      }
+      
+      // Sum amounts per month for this category
+      for (let i = 1; i <= 3; i++) {
+        const targetMonth = new Date(currentYear, currentMonth - i, 1);
+        const monthKey = `${targetMonth.getMonth()}-${targetMonth.getFullYear()}`;
+        const monthExpenses = expenses.filter(e => {
+          const d = new Date(e.Date);
+          return d.getMonth() === targetMonth.getMonth() && 
+                 d.getFullYear() === targetMonth.getFullYear() &&
+                 (e.Category || 'Uncategorized') === cat;
+        });
+        monthTotals[monthKey] = monthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+      }
+      
+      const total = Object.values(monthTotals).reduce((sum, val) => sum + val, 0);
+      categoryAverages[cat] = total / 3;
+    });
+
+    // Compare current vs average
+    const categoriesAboveAverage = [];
+    Object.keys(currentCategoryTotals).forEach(cat => {
+      const currentTotal = currentCategoryTotals[cat];
+      const avg = categoryAverages[cat] || 0;
+      
+      if (avg > 0 && currentTotal > avg) {
+        const percentHigher = ((currentTotal - avg) / avg) * 100;
+        categoriesAboveAverage.push({
+          category: cat,
+          current: currentTotal,
+          average: avg,
+          percentHigher: percentHigher
+        });
+      }
+    });
+
+    // Build response
+    if (categoriesAboveAverage.length === 0) {
+      return {
+        success: true,
+        response: `✅ Good news! No categories are above their 3-month average this month. Your spending is well-balanced across all categories.`
+      };
+    }
+
+    categoriesAboveAverage.sort((a, b) => b.percentHigher - a.percentHigher);
+    const topCategories = categoriesAboveAverage.slice(0, 5);
+    
+    let response = `📊 Yes, ${categoriesAboveAverage.length} ${categoriesAboveAverage.length === 1 ? 'category is' : 'categories are'} above their 3-month average:\n\n`;
+    
+    topCategories.forEach((cat, idx) => {
+      const icon = idx === 0 ? '🔴' : (idx === 1 ? '🟠' : '🟡');
+      response += `${icon} ${cat.category}: ₹${cat.current.toFixed(2)}\n`;
+      response += `   (Avg: ₹${cat.average.toFixed(2)}, +${cat.percentHigher.toFixed(1)}%)\n\n`;
+    });
+    
+    if (categoriesAboveAverage.length > 5) {
+      response += `...and ${categoriesAboveAverage.length - 5} more categories above average.`;
+    }
+    
+    return { success: true, response: response.trim() };
+  }
+
+  // ===========================================
+  // 2. SPENDING TREND ANALYSIS
+  // ===========================================
+  if (lowerQuery.includes('trend') || lowerQuery.includes('pattern') || lowerQuery.includes('spending this month')) {
+    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+    const avgDaily = totalSpent / now.getDate();
+
+    // Category breakdown
+    const categoryMap = {};
+    currentMonthExpenses.forEach(e => {
+      const cat = e.Category || 'Uncategorized';
+      categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
+    });
+    
+    const sortedCategories = Object.entries(categoryMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+
+    // Last month comparison
+    const lastMonth = new Date(currentYear, currentMonth - 1, 1);
+    const lastMonthExpenses = expenses.filter(e => {
+      const d = new Date(e.Date);
+      return d.getMonth() === lastMonth.getMonth() && 
+             d.getFullYear() === lastMonth.getFullYear();
+    });
+    const lastMonthTotal = lastMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+    
+    let trendText = '';
+    if (lastMonthTotal > 0) {
+      const change = ((totalSpent - lastMonthTotal) / lastMonthTotal) * 100;
+      const changeIcon = change > 0 ? '📈' : '📉';
+      trendText = `\n\n${changeIcon} Compared to last month: ${change > 0 ? '+' : ''}${change.toFixed(1)}% (₹${(totalSpent - lastMonthTotal).toFixed(2)})`;
+    }
+
+    const response = `💰 This month you've spent ₹${totalSpent.toFixed(2)} across ${currentMonthExpenses.length} transactions.\n\n` +
+                    `📊 Daily average: ₹${avgDaily.toFixed(2)}\n\n` +
+                    `🏆 Top categories:\n` +
+                    sortedCategories.map(([cat, amt]) => `• ${cat}: ₹${amt.toFixed(2)}`).join('\n') +
+                    trendText;
+
+    return { success: true, response };
+  }
+
+  // ===========================================
+  // 3. TOP SPENDING CATEGORY
+  // ===========================================
+  if ((lowerQuery.includes('which') || lowerQuery.includes('what')) && 
+      (lowerQuery.includes('category') || lowerQuery.includes('categories')) && 
+      (lowerQuery.includes('most') || lowerQuery.includes('highest') || lowerQuery.includes('top'))) {
+    
     const categoryMap = {};
     currentMonthExpenses.forEach(e => {
       const cat = e.Category || 'Uncategorized';
@@ -450,83 +194,197 @@ function processChatbotQuery(query) {
     });
 
     const sorted = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
-    const response = `Your top spending categories this month:\n${sorted.slice(0, 5).map(([cat, amt]) => `• ${cat}: ₹${amt.toFixed(2)}`).join('\n')}`;
+    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
     
+    let response = `🏆 Your top spending categories this month:\n\n`;
+    sorted.slice(0, 5).forEach(([cat, amt], idx) => {
+      const percentage = ((amt / totalSpent) * 100).toFixed(1);
+      const icon = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : '•'));
+      response += `${icon} ${cat}: ₹${amt.toFixed(2)} (${percentage}%)\n`;
+    });
+
     return { success: true, response };
   }
 
-  // Total spending
-  if (lowerQuery.includes('total') || lowerQuery.includes('spent')) {
-    return { 
-      success: true, 
-      response: `This month you've spent ₹${totalSpent.toFixed(2)} across ${currentMonthExpenses.length} transactions.` 
-    };
-  }
-
-  // Trend analysis
-  if (lowerQuery.includes('trend') || lowerQuery.includes('pattern')) {
-    const insights = generateExpenseInsights();
-    const trendInsights = insights.filter(i => i.type === 'trend');
-    
-    if (trendInsights.length > 0) {
-      return { 
-        success: true, 
-        response: trendInsights.map(i => i.message).join('\n\n') 
-      };
-    }
-  }
-  // Rerun insight analysis
-  if (lowerQuery.includes('rerun') || lowerQuery.includes('recheck') || lowerQuery.includes('new insights')) {
-    const insights = generateExpenseInsights();
-    storeInsightsAsNotifications(insights);
+  // ===========================================
+  // 4. TOTAL SPENDING
+  // ===========================================
+  if (lowerQuery.includes('total') || lowerQuery.includes('how much') || lowerQuery.includes('spent')) {
+    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+    const numCategories = new Set(currentMonthExpenses.map(e => e.Category)).size;
+    const avgDaily = totalSpent / now.getDate();
 
     return {
       success: true,
-      response: `I've re-analyzed your recent expenses and generated ${insights.length} insights. You can check them in your Insights tab or notifications.`
+      response: `💰 This month you've spent ₹${totalSpent.toFixed(2)} across ${numCategories} categories and ${currentMonthExpenses.length} transactions.\n\n📊 Daily average: ₹${avgDaily.toFixed(2)}`
     };
   }
 
-  // Default response
+  // ===========================================
+  // 5. WEEK COMPARISON
+  // ===========================================
+  if (lowerQuery.includes('week') && (lowerQuery.includes('compare') || lowerQuery.includes('last') || lowerQuery.includes('this'))) {
+    const weekAgo = new Date(now);
+    weekAgo.setDate(now.getDate() - 7);
+    
+    const thisWeek = currentMonthExpenses.filter(e => {
+      const d = new Date(e.Date);
+      return d >= weekAgo && d <= now;
+    });
+    const thisWeekTotal = thisWeek.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+
+    const twoWeeksAgo = new Date(now);
+    twoWeeksAgo.setDate(now.getDate() - 14);
+    
+    const lastWeek = currentMonthExpenses.filter(e => {
+      const d = new Date(e.Date);
+      return d >= twoWeeksAgo && d < weekAgo;
+    });
+    const lastWeekTotal = lastWeek.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+
+    if (lastWeekTotal === 0) {
+      return {
+        success: true,
+        response: `📊 This week's spending: ₹${thisWeekTotal.toFixed(2)} (${thisWeek.length} transactions)\n\nNo data available for last week to compare.`
+      };
+    }
+
+    const change = ((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100;
+    const changeIcon = change > 0 ? '📈' : '📉';
+    const changeText = change > 0 ? 'higher' : 'lower';
+
+    return {
+      success: true,
+      response: `${changeIcon} This week: ₹${thisWeekTotal.toFixed(2)} (${thisWeek.length} transactions)\n` +
+               `Last week: ₹${lastWeekTotal.toFixed(2)} (${lastWeek.length} transactions)\n\n` +
+               `Change: ${Math.abs(change).toFixed(1)}% ${changeText} (₹${Math.abs(thisWeekTotal - lastWeekTotal).toFixed(2)})`
+    };
+  }
+
+  // ===========================================
+  // 6. IMPULSE PURCHASES
+  // ===========================================
+  if (lowerQuery.includes('impulse')) {
+    const impulseExpenses = currentMonthExpenses.filter(e => {
+      const labels = (e.Labels || '').toLowerCase();
+      return labels.includes('impulse');
+    });
+    
+    const impulseTotal = impulseExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+    const percentage = totalSpent > 0 ? ((impulseTotal / totalSpent) * 100).toFixed(1) : 0;
+
+    if (impulseExpenses.length === 0) {
+      return {
+        success: true,
+        response: `✅ Great job! No impulse purchases detected this month.`
+      };
+    }
+
+    // Top impulse items
+    const impulseByCategory = {};
+    impulseExpenses.forEach(e => {
+      const cat = e.Category || 'Uncategorized';
+      impulseByCategory[cat] = (impulseByCategory[cat] || 0) + parseFloat(e.Amount || 0);
+    });
+    
+    const topImpulse = Object.entries(impulseByCategory)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+
+    let response = `🛍️ Impulse purchases: ₹${impulseTotal.toFixed(2)} (${percentage}% of total)\n\n`;
+    response += `${impulseExpenses.length} impulse transactions found:\n`;
+    topImpulse.forEach(([cat, amt]) => {
+      response += `• ${cat}: ₹${amt.toFixed(2)}\n`;
+    });
+
+    if (percentage > 15) {
+      response += `\n⚠️ This is ${percentage}% of your spending. Consider setting a weekly impulse budget of ₹${(impulseTotal / 4).toFixed(2)} to reduce by 50%.`;
+    } else {
+      response += `\n✅ Good control over impulse spending!`;
+    }
+
+    return { success: true, response };
+  }
+
+  // ===========================================
+  // 7. UNUSUAL PATTERNS / ANOMALIES
+  // ===========================================
+  if (lowerQuery.includes('unusual') || lowerQuery.includes('anomaly') || lowerQuery.includes('strange') || lowerQuery.includes('weird')) {
+    const insights = [];
+    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+    const avgDaily = totalSpent / now.getDate();
+
+    // Check today's spending
+    const todayExpenses = currentMonthExpenses.filter(e => {
+      const d = new Date(e.Date);
+      return d.toDateString() === now.toDateString();
+    });
+    const todayTotal = todayExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+    
+    if (todayTotal > avgDaily * 2) {
+      insights.push(`🔴 Today's spending (₹${todayTotal.toFixed(2)}) is ${((todayTotal / avgDaily - 1) * 100).toFixed(0)}% above daily average`);
+    }
+
+    // Check spending bursts
+    const timeMap = {};
+    currentMonthExpenses.forEach(e => {
+      if (e.Timestamp) {
+        const hour = new Date(e.Timestamp).getHours();
+        const dateKey = new Date(e.Timestamp).toDateString();
+        const key = `${dateKey}-${hour}`;
+        timeMap[key] = (timeMap[key] || 0) + 1;
+      }
+    });
+    
+    const bursts = Object.entries(timeMap).filter(([_, count]) => count >= 3);
+    if (bursts.length > 0) {
+      insights.push(`⚡ Spending burst detected: ${bursts[0][1]} transactions in one hour`);
+    }
+
+    // Check vendor frequency
+    const vendorMap = {};
+    currentMonthExpenses.forEach(e => {
+      const vendor = e['Shop/Site/Person name'];
+      if (vendor) {
+        vendorMap[vendor] = (vendorMap[vendor] || 0) + 1;
+      }
+    });
+    
+    const frequentVendors = Object.entries(vendorMap).filter(([_, count]) => count >= 5);
+    if (frequentVendors.length > 0) {
+      const top = frequentVendors.sort((a, b) => b[1] - a[1])[0];
+      insights.push(`🏪 High frequency: ${top[1]} transactions at ${top[0]}`);
+    }
+
+    if (insights.length === 0) {
+      return {
+        success: true,
+        response: `✅ No unusual spending patterns detected this month. Your spending behavior looks consistent!`
+      };
+    }
+
+    return {
+      success: true,
+      response: `🔍 Unusual patterns detected:\n\n` + insights.join('\n\n')
+    };
+  }
+
+  // ===========================================
+  // 8. DEFAULT / FALLBACK
+  // ===========================================
+  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
+  const categoryMap = {};
+  currentMonthExpenses.forEach(e => {
+    const cat = e.Category || 'Uncategorized';
+    categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
+  });
+  const topCategory = Object.entries(categoryMap).sort((a, b) => b[1] - a[1])[0];
+
   return {
     success: true,
-    response: `I analyzed your expenses. This month: ₹${totalSpent.toFixed(2)} spent across ${currentMonthExpenses.length} transactions. Ask me about categories, trends, or specific insights!`
+    response: `💡 This month: ₹${totalSpent.toFixed(2)} spent across ${currentMonthExpenses.length} transactions.\n\n` +
+             `🏆 Top category: ${topCategory[0]} (₹${topCategory[1].toFixed(2)})\n\n` +
+             `Try asking:\n• "Which category did I spend most on?"\n• "Compare this week with last week"\n• "Show my impulse purchases"\n• "Are any categories above average?"`
   };
-}
-
-/**
- * Scheduled trigger to generate insights daily
- */
-function dailyInsightGeneration() {
-  const insights = generateExpenseInsights();
-  
-  // Only store high and medium severity insights as notifications
-  const importantInsights = insights.filter(i => 
-    i.severity === 'high' || i.severity === 'medium'
-  );
-  
-  if (importantInsights.length > 0) {
-    storeInsightsAsNotifications(importantInsights);
-    Logger.log(`Generated ${importantInsights.length} insights`);
-  }
-}
-
-/**
- * Setup daily insight trigger
- */
-function setupInsightTrigger() {
-  // Remove existing insight triggers
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'dailyInsightGeneration') {
-      ScriptApp.deleteTrigger(t);
-    }
-  });
-
-  // Run daily at 9 AM
-  ScriptApp.newTrigger('dailyInsightGeneration')
-    .timeBased()
-    .everyDays(1)
-    .atHour(9)
-    .create();
-
-  Logger.log('Daily insight trigger created');
 }

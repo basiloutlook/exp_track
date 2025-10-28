@@ -28,23 +28,20 @@ class ChatHistoryService {
   /**
    * Get all chat messages from storage
    */
-  async getChatHistory(): Promise<ChatMessage[]> {
-    try {
-      const historyJson = await AsyncStorage.getItem(CHAT_HISTORY_KEY);
-      if (!historyJson) return [];
+  async getChatHistory(limit?: number, offset?: number): Promise<ChatMessage[]> {
+  const data = await AsyncStorage.getItem(CHAT_HISTORY_KEY);
+  const all: ChatMessage[] = data ? JSON.parse(data) : [];
+  
+  // Sort oldest → newest just in case
+  const sorted = all.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-      const history = JSON.parse(historyJson);
-      
-      // Convert timestamp strings back to Date objects
-      return history.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-      }));
-    } catch (error) {
-      console.error('Error loading chat history:', error);
-      return [];
-    }
+  if (limit != null && offset != null) {
+    return sorted.slice(Math.max(sorted.length - offset - limit, 0), sorted.length - offset);
   }
+
+  return sorted;
+}
+
 
   /**
    * Save a single message to history

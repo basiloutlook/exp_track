@@ -2,8 +2,8 @@
 import { Expense } from "@/types/expense";
 import { storageService } from "./storage";
 
-const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL!;
-console.log("🔗 Google Sheet URL:", process.env.GOOGLE_SHEET_URL);
+const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!;
+console.log("🔗 Google Sheet URL:", GOOGLE_SHEET_URL);
 
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.
@@ -49,14 +49,21 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const data = await response.json();
+  const raw = await response.json();
+  const data = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw.expenses)
+    ? raw.expenses
+    : Array.isArray(raw.data)
+    ? raw.data
+    : [];
 
-    if (!Array.isArray(data)) {
-      console.warn("⚠️ Invalid data format from Google Sheets");
-      // Try to return cached data as fallback
-      const cached = await storageService.getCachedExpensesWithTimestamp();
-      return cached?.expenses || [];
-    }
+  if (!Array.isArray(data) || data.length === 0) {
+    console.warn("⚠️ No valid expenses found in Google Sheets response", raw);
+    const cached = await storageService.getCachedExpensesWithTimestamp();
+    return cached?.expenses || [];
+  }
+
 
     const expenses = data.map((row: any, index: number) => {
       const expense: Expense = {
@@ -65,7 +72,7 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
         category: row.category || row.Category || "",
         subCategory:
           row.subCategory || row["Sub Category"] || row.subcategory || "",
-        item: row.item || row.Item || "",
+        item: row.item || row.Item || row["Item Name"] || "",
         amount: parseFloat(row.amount || row.Amount || 0) || 0,
         email: row.email || row["Email Address"] || "",
         shopName:
@@ -84,6 +91,8 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
       };
       return expense;
     });
+
+    console.log("🧾 Sample expense:", expenses[0]);
 
     // Cache the fresh data
     await storageService.setCachedExpenses(expenses);

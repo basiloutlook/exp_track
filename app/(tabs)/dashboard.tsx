@@ -862,6 +862,7 @@ export default function Dashboard() {
   const loadExpenses = useCallback(async () => {
     setIsLoading(true);
     try {
+      await storageService.invalidateCache();
       const sheetExpenses = await getExpensesFromGoogleSheet();
       const hasSheetData = Array.isArray(sheetExpenses) && sheetExpenses.length > 0;
       const data = hasSheetData ? sheetExpenses : (await storageService.getExpenses() || []);
@@ -1643,11 +1644,4 @@ return (
     </View>
   </SafeAreaView>
   );
-}
-
-
-if (__DEV__) {
-  (async () => {
-    await activateKeepAwakeAsync();
-  })();
 }

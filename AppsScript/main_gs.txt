@@ -64,12 +64,15 @@ function doPost(e) {
         message: `Generated ${insights.length} insights`
       });
     }
-  if (action === 'rerunInsights') {
-    const insights = generateExpenseInsights();
-    storeInsightsAsNotifications(insights);
-    return jsonResponse({ success: true, message: `Re-analyzed data and created ${insights.length} insights.` });
-  }
-
+   if (action === 'rerunInsights') {
+      const insights = generateExpenseInsights();
+      storeInsightsAsNotifications(insights);
+      return jsonResponse({
+        success: true,
+        count: insights.length,
+        message: `Re-ran analysis and generated ${insights.length} insights.`,
+      });
+    }
     return jsonResponse({ success: false, message: 'Invalid action' });
   } catch (err) {
     return jsonResponse({ success: false, message: err.message || String(err) });

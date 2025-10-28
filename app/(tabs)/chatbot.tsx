@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Send, Bot, User, TrendingUp, Sparkles, AlertCircle, CheckCircle, Info } from 'lucide-react-native';
-import { getChatbotResponse } from '@/utils/chatbotService';
+import { getChatbotResponse, Content } from '@/utils/chatbotService';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 import { Expense } from '@/types/expense';
 import { chatHistoryService, ChatMessage } from '@/utils/chatHistoryService';
@@ -46,10 +46,14 @@ const SEVERITY_COLORS: Record<string, { bg: string; border: string; text: string
 
 export default function Chatbot() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const PAGE_SIZE = 20;
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [apiHistory, setApiHistory] = useState<Content[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
 
   // Load expenses and chat history on mount
@@ -76,15 +80,18 @@ export default function Chatbot() {
       setExpenses(expenseData);
 
       // Load chat history (includes user messages, bot responses, AND insights)
-      const history = await chatHistoryService.getChatHistory();
+      const recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+      setMessages(recentMessages);
+      setOffset(PAGE_SIZE);
+
       
       // Sync new insights from server
       const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
       
       // Reload history if new insights were added
       const updatedHistory = newInsightsCount > 0 
-        ? await chatHistoryService.getChatHistory() 
-        : history;
+        ? await chatHistoryService.getChatHistory(PAGE_SIZE, 0) 
+        : messages;
       
       if (updatedHistory.length === 0) {
         // First time user - add welcome message
@@ -110,6 +117,21 @@ export default function Chatbot() {
       setIsLoadingHistory(false);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
     }
+  };
+
+  const loadOlderMessages = async () => {
+    if (isLoadingHistory || !hasMore) return;
+    setIsLoadingHistory(true);
+
+    const older = await chatHistoryService.getChatHistory(PAGE_SIZE, offset);
+    if (older.length === 0) {
+      setHasMore(false);
+    } else {
+      setMessages((prev) => [...older, ...prev]); // prepend
+      setOffset((prev) => prev + PAGE_SIZE);
+    }
+
+    setIsLoadingHistory(false);
   };
 
   const syncNewInsights = async () => {
@@ -147,18 +169,33 @@ export default function Chatbot() {
     setIsLoading(true);
 
     try {
-      const response = await getChatbotResponse(text, expenses);
-      
+      // --- START OF CHANGES ---
+
+      // 1. Call with `apiHistory`, NOT `expenses`.
+      //    The `text` variable already contains the user's query.
+      const { newHistory, responseText } = await getChatbotResponse(
+        text, 
+        apiHistory 
+      );
+
+      // 2. Update the API history state for the next conversation turn
+      setApiHistory(newHistory);
+
+      // 3. Use `responseText` for the bot's message
       const botMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
-        text: response,
+        text: responseText, // <-- Use responseText
         type: 'bot',
         timestamp: new Date(),
       };
 
+      // --- END OF CHANGES ---
+
       setMessages((prev) => [...prev, botMessage]);
       await chatHistoryService.saveMessage(botMessage);
+
     } catch (error) {
+      console.error('Chatbot handleSend error:', error); // Log the error
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         text: "I'm having trouble analyzing your data right now. Please try again.",
@@ -181,7 +218,9 @@ export default function Chatbot() {
           <View style={styles.messageHeader}>
             <User size={16} color="#ffffff" />
             <Text style={[styles.messageTime, { color: '#dbeafe' }]}>
-              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {message.timestamp
+    ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : ""}
             </Text>
           </View>
           <Text style={[styles.messageText, { color: '#ffffff' }]}>{message.text}</Text>
@@ -196,7 +235,9 @@ export default function Chatbot() {
           <View style={styles.messageHeader}>
             <Bot size={16} color="#10b981" />
             <Text style={styles.messageTime}>
-              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {message.timestamp
+    ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : ""}
             </Text>
           </View>
           <Text style={styles.messageText}>{message.text}</Text>
@@ -225,7 +266,9 @@ export default function Chatbot() {
             </View>
             <Text style={[styles.insightText, { color: severityStyle.text }]}>{message.text}</Text>
             <Text style={[styles.insightTime, { color: severityStyle.text }]}>
-              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • Auto-generated
+              {message.timestamp
+    ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : ""}
             </Text>
           </View>
         </View>
@@ -285,20 +328,30 @@ export default function Chatbot() {
         </ScrollView>
 
         {/* Messages */}
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesContainer}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {messages.map(renderMessage)}
-          {isLoading && (
-            <View style={styles.loadingMessageContainer}>
-              <ActivityIndicator size="small" color="#10b981" />
-              <Text style={styles.loadingMessageText}>Analyzing your data...</Text>
-            </View>
-          )}
-        </ScrollView>
+<ScrollView
+  ref={scrollViewRef}
+  style={styles.messagesContainer}
+  contentContainerStyle={styles.messagesContent}
+  showsVerticalScrollIndicator={false}
+  onScroll={({ nativeEvent }) => {
+    if (nativeEvent.contentOffset.y <= 0) {
+      loadOlderMessages();
+    }
+  }}
+  scrollEventThrottle={100}
+>
+  {isLoadingHistory && hasMore && (
+    <ActivityIndicator size="small" color="#10b981" style={{ marginBottom: 10 }} />
+  )}
+  {messages.map(renderMessage)}
+  {isLoading && (
+    <View style={styles.loadingMessageContainer}>
+      <ActivityIndicator size="small" color="#10b981" />
+      <Text style={styles.loadingMessageText}>Analyzing your data...</Text>
+    </View>
+  )}
+</ScrollView>
+
 
         {/* Input */}
         <View style={styles.inputContainer}>
