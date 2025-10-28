@@ -38,7 +38,7 @@ function doPost(e) {
     if (action === 'getNotifications') return jsonResponse(getNotifications(data.unreadOnly));
     if (action === 'markNotificationRead') return jsonResponse(markNotificationRead(data.id));
     if (action === 'markNotificationDismissed') return jsonResponse(markNotificationDismissed(data.id));
-    
+
     // Existing chatbot actions
     if (action === 'getChatInsights') {
       const insights = generateExpenseInsights();
@@ -58,7 +58,11 @@ function doPost(e) {
     if (action === 'generateInsights') {
       const insights = generateExpenseInsights();
       storeInsightsAsNotifications(insights);
-      return jsonResponse({ success: true, count: insights.length, message: `Generated ${insights.length} insights` });
+      return jsonResponse({
+        success: true,
+        count: insights.length,
+        message: `Generated ${insights.length} insights`
+      });
     }
 
     return jsonResponse({ success: false, message: 'Invalid action' });
@@ -91,11 +95,10 @@ function doGet(e) {
   }
 }
 
+
 /**
  * handleExpenseAction(action, data)
  * - add / update / delete rows in Form Responses 1
- * Columns expected (sheet): 
- * Timestamp | Date | Category | Sub Category | Item | Amount | Email Address | Shop/Site/Person name | Mode of payment | Labels | ID
  */
 function handleExpenseAction(action, data) {
   const sheet = getSheet(SHEETS.EXPENSES);
@@ -152,44 +155,28 @@ function handleExpenseAction(action, data) {
 }
 
 /**
- * Triggers - run once to set time-based triggers
+ * Triggers
  */
 function setupTriggers() {
-  // Remove existing triggers from this project to avoid duplicates
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
 
-  // Run calculateAllMetrics every 4 hours (customize if needed)
-  ScriptApp.newTrigger('calculateAllMetrics')
-    .timeBased()
-    .everyHours(4)
-    .create();
-
-  // Daily maintenance/check
-  ScriptApp.newTrigger('calculateAllMetrics')
-    .timeBased()
-    .everyDays(1)
-    .create();
+  ScriptApp.newTrigger('calculateAllMetrics').timeBased().everyHours(4).create();
+  ScriptApp.newTrigger('calculateAllMetrics').timeBased().everyDays(1).create();
 
   Logger.log('Triggers setup complete');
 }
 
 /**
- * oneTimeSetup - create sheets & initial rows
+ * oneTimeSetup
  */
 function oneTimeSetup() {
-  // Create or ensure sheets exist and headers set in settings.gs
   ensureSheetsExistAndHeaders();
-  // Initialize sample metrics based on settings
   const settings = getUserSettings();
   initializeMetrics(settings);
-  // Run initial calculations
   calculateAllMetrics();
   Logger.log('One time setup complete');
 }
 
-/**
- * Helper: minimal test helper to simulate an add + instant metric run
- */
 function testNotification() {
   const testExpense = {
     action: 'add',
@@ -211,36 +198,118 @@ function testNotification() {
 }
 
 /**
- * jsonResponse - helper for web responses
+ * ✅ FIXED: jsonResponse - return valid JSON (no addHeader)
  */
 function jsonResponse(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * ✅ Simplified OPTIONS handler (CORS preflight)
+ */
+function doOptions(e) {
+  return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
 }
 
 function debugOneTimeSetup() {
   try {
     Logger.log('Starting...');
-    ensureSheetsExistAndHeaders();  // from settings.gs
-    Logger.log('Ensured sheets exist');
+    ensureSheetsExistAndHeaders();
     const settings = getUserSettings();
-    Logger.log('Settings retrieved: ' + JSON.stringify(settings));
     initializeMetrics(settings);
-    Logger.log('Metrics initialized');
     calculateAllMetrics();
-    Logger.log('Metrics calculated');
+    Logger.log('Setup complete');
   } catch (e) {
     Logger.log('Error in debugOneTimeSetup: ' + e + '\nStack:\n' + e.stack);
   }
 }
+
+/**
+ * getExpenses - Read all valid expense entries from the sheet.
+ * Columns expected:
+ * Timestamp | Date | Category | Sub Category | Item | Amount | Email Address | Shop/Site/Person name | Mode of payment | Labels | ID
+ */
+function getExpenses() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.EXPENSES);
+  if (!sheet) return [];
+
+  const data = sheet.getDataRange().getValues();
+  if (!data || data.length <= 1) return [];
+
+  const headers = data.shift(); // Remove header row
+  const expenses = [];
+
+  data.forEach((row, index) => {
+    // Skip empty rows or placeholder entries
+    if (!row[1] && !row[4] && !row[5]) return;
+
+    try {
+      const expense = {
+        id: row[10] || `sheet-${index + 1}`,
+        timestamp: row[0] ? new Date(row[0]).toISOString() : '',
+        date: normalizeDate(row[1]),
+        category: row[2] || '',
+        subCategory: row[3] || '',
+        item: row[4] || '',
+        amount: parseFloat(row[5]) || 0,
+        email: row[6] || '',
+        shopName: row[7] || '',
+        paymentMode: row[8] || '',
+        labels: parseLabels(row[9]),
+      };
+      expenses.push(expense);
+    } catch (err) {
+      Logger.log(`Skipping row ${index + 2}: ${err}`);
+    }
+  });
+
+  return expenses;
+}
+
+/**
+ * normalizeDate - Converts date cells into yyyy-MM-dd string format.
+ */
+function normalizeDate(value) {
+  if (!value) return '';
+  try {
+    if (Object.prototype.toString.call(value) === '[object Date]') {
+      return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+    const parsed = new Date(value);
+    if (!isNaN(parsed)) {
+      return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+  } catch (err) {
+    Logger.log('normalizeDate error: ' + err);
+  }
+  return '';
+}
+
+/**
+ * parseLabels - Converts a comma-separated string into a clean array.
+ */
+function parseLabels(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  return String(value)
+    .split(',')
+    .map(l => l.trim())
+    .filter(Boolean);
+}
+
+
 function setupInsightTrigger() {
-  // Remove existing insight triggers
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'dailyInsightGeneration') {
       ScriptApp.deleteTrigger(t);
     }
   });
 
-  // Run daily at 9 AM
   ScriptApp.newTrigger('dailyInsightGeneration')
     .timeBased()
     .everyDays(1)
