@@ -27,7 +27,6 @@ import {
   recordInsightFeedback,
   getUserPreferences,
 } from '@/utils/conversationContextService';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
 const QUICK_QUERIES = [
@@ -88,15 +87,7 @@ export default function Chatbot() {
       }
     }, [isLoadingHistory, messages.length])
   );
-  const clearAllData = async () => {
-  try {
-    await AsyncStorage.clear();
-    console.log('✅ All data cleared');
-    alert('All data cleared! Restart the app.');
-  } catch (error) {
-    console.error('Error clearing data:', error);
-  }
-};
+  
 
   const loadInitialData = async () => {
     console.log('📥 Loading initial data...');
@@ -463,9 +454,6 @@ export default function Chatbot() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-<TouchableOpacity onPress={clearAllData}>
-  <Text>Clear All Data</Text>
-</TouchableOpacity>
         {/* Messages */}
         <ScrollView
           ref={scrollViewRef}
