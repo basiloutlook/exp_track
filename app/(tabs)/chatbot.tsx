@@ -27,8 +27,7 @@ import {
   recordInsightFeedback,
   getUserPreferences,
 } from '@/utils/conversationContextService';
-
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
 const QUICK_QUERIES = [
@@ -56,31 +55,32 @@ const SEVERITY_COLORS: Record<string, { bg: string; border: string; text: string
   positive: { bg: '#f0fdf4', border: '#86efac', text: '#166534', icon: '#16a34a' },
 };
 
-// 2. ADD NEW STATE VARIABLES (add these with your existing useState calls)
-const [userContext, setUserContext] = useState<string>('');
-const [showFeedbackFor, setShowFeedbackFor] = useState<string | null>(null);
-
-
 export default function Chatbot() {
+  // ✅ ALL STATE VARIABLES INSIDE THE COMPONENT
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
-  const PAGE_SIZE = 20;
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [apiHistory, setApiHistory] = useState<Content[]>([]);
+  const [userContext, setUserContext] = useState<string>('');
+  const [showFeedbackFor, setShowFeedbackFor] = useState<string | null>(null);
+  
+  const PAGE_SIZE = 20;
   const scrollViewRef = useRef<ScrollView>(null);
 
   // Load expenses and chat history on mount
   useEffect(() => {
+    console.log('🤖 Chatbot mounted - loading initial data');
     loadInitialData();
   }, []);
 
   // Refresh when screen comes into focus (optimized)
   useFocusEffect(
     useCallback(() => {
+      console.log('🤖 Chatbot focused');
       if (!isLoadingHistory && messages.length === 0) {
         loadInitialData(); // First time only
       } else if (!isLoadingHistory) {
@@ -88,70 +88,87 @@ export default function Chatbot() {
       }
     }, [isLoadingHistory, messages.length])
   );
-
-  const loadInitialData = async () => {
-  setIsLoadingHistory(true);
+  const clearAllData = async () => {
   try {
-    // Initialize user context
-    await initializeUserContext();
-    
-    // Build context for Gemini
-    const context = await buildConversationContext();
-    setUserContext(context);
-    
-    // Load expenses
-    const expenseData = await getExpensesFromGoogleSheet();
-    setExpenses(expenseData);
-
-    // Load chat history
-    const recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
-    setMessages(recentMessages);
-    setOffset(PAGE_SIZE);
-
-    // Sync insights from server
-    const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
-    
-    // ✨ NEW: Generate passive insights (once per day)
-    await generatePassiveInsights();
-    
-    // ✨ NEW: Check for data-specific patterns (your actual data)
-    const dataInsights = await checkDataSpecificPatterns(expenseData);
-    for (const insight of dataInsights) {
-      await chatHistoryService.saveMessage(insight);
-    }
-    
-    const updatedHistory = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
-    
-    if (updatedHistory.length === 0) {
-      // Get user preferences for personalized welcome
-      const prefs = await getUserPreferences();
-      const tone = prefs.preferredTone === 'professional' ? 
-        "Hello! I'm your expense assistant." :
-        "Hi! I'm your expense assistant 👋";
-      
-      const welcomeMessage: ChatMessage = {
-        id: Date.now().toString(),
-        text: `${tone} I analyze your spending patterns and provide smart insights. I'll learn from our conversations to give you better advice. Ask me anything!`,
-        type: 'bot',
-        timestamp: new Date(),
-      };
-      await chatHistoryService.saveMessage(welcomeMessage);
-      setMessages([welcomeMessage]);
-    } else {
-      setMessages(updatedHistory);
-      
-      if (newInsightsCount > 0) {
-        console.log(`✨ ${newInsightsCount} new insight(s) added to chat`);
-      }
-    }
+    await AsyncStorage.clear();
+    console.log('✅ All data cleared');
+    alert('All data cleared! Restart the app.');
   } catch (error) {
-    console.error('Error loading initial data:', error);
-  } finally {
-    setIsLoadingHistory(false);
-    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+    console.error('Error clearing data:', error);
   }
 };
 
+  const loadInitialData = async () => {
+    console.log('📥 Loading initial data...');
+    setIsLoadingHistory(true);
+    try {
+      // Initialize user context
+      console.log('🔧 Initializing user context...');
+      await initializeUserContext();
+      
+      // Build context for Gemini
+      const context = await buildConversationContext();
+      setUserContext(context);
+      console.log('✅ User context loaded');
+      
+      // Load expenses
+      console.log('💰 Loading expenses...');
+      const expenseData = await getExpensesFromGoogleSheet();
+      setExpenses(expenseData);
+      console.log(`✅ Loaded ${expenseData.length} expenses`);
+
+      // Load chat history
+      console.log('💬 Loading chat history...');
+      const recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+      setMessages(recentMessages);
+      setOffset(PAGE_SIZE);
+      console.log(`✅ Loaded ${recentMessages.length} messages`);
+
+      // Sync insights from server
+      const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
+      
+      // Generate passive insights (once per day)
+      await generatePassiveInsights();
+      
+      // Check for data-specific patterns
+      const dataInsights = await checkDataSpecificPatterns(expenseData);
+      for (const insight of dataInsights) {
+        await chatHistoryService.saveMessage(insight);
+      }
+      
+      const updatedHistory = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+      
+      if (updatedHistory.length === 0) {
+        // Get user preferences for personalized welcome
+        const prefs = await getUserPreferences();
+        const tone = prefs.preferredTone === 'professional' ? 
+          "Hello! I'm your expense assistant." :
+          "Hi! I'm your expense assistant 👋";
+        
+        const welcomeMessage: ChatMessage = {
+          id: Date.now().toString(),
+          text: `${tone} I analyze your spending patterns and provide smart insights. I'll learn from our conversations to give you better advice. Ask me anything!`,
+          type: 'bot',
+          timestamp: new Date(),
+        };
+        await chatHistoryService.saveMessage(welcomeMessage);
+        setMessages([welcomeMessage]);
+        console.log('👋 Welcome message created');
+      } else {
+        setMessages(updatedHistory);
+        
+        if (newInsightsCount > 0) {
+          console.log(`✨ ${newInsightsCount} new insight(s) added to chat`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error loading initial data:', error);
+    } finally {
+      setIsLoadingHistory(false);
+      console.log('✅ Initial data load complete');
+      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  };
 
   const loadOlderMessages = async () => {
     if (isLoadingHistory || !hasMore) return;
@@ -169,184 +186,202 @@ export default function Chatbot() {
   };
 
   const syncNewInsights = async () => {
-  try {
-    // Sync from server
-    const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
-    
-    // ✨ NEW: Also generate passive insights
-    await generatePassiveInsights();
-    
-    if (newInsightsCount > 0) {
-      const updatedHistory = await chatHistoryService.getChatHistory();
-      setMessages(updatedHistory);
-      console.log(`✨ ${newInsightsCount} new insight(s) added to chat`);
+    try {
+      // Sync from server
+      const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
+      
+      // Generate passive insights
+      await generatePassiveInsights();
+      
+      if (newInsightsCount > 0) {
+        const updatedHistory = await chatHistoryService.getChatHistory();
+        setMessages(updatedHistory);
+        console.log(`✨ ${newInsightsCount} new insight(s) added to chat`);
+        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+      }
+    } catch (error) {
+      console.error('Error syncing insights:', error);
+    }
+  };
+
+  const handleSend = async (queryText?: string) => {
+    const text = queryText || inputText.trim();
+    if (!text) return;
+
+    console.log('📤 Sending message:', text);
+
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      text,
+      type: 'user',
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    await chatHistoryService.saveMessage(userMessage);
+    setInputText('');
+    setIsLoading(true);
+
+    try {
+      // Learn from user's message
+      await learnFromUserResponse(text);
+      
+      // Extract topic for memory
+      const topic = extractTopic(text);
+      if (topic) {
+        await recordDiscussedTopic(topic);
+      }
+
+      console.log('🤖 Getting chatbot response...');
+      // Call chatbot with context
+      const { newHistory, responseText } = await getChatbotResponse(
+        text, 
+        apiHistory,
+        userContext
+      );
+
+      setApiHistory(newHistory);
+
+      const botMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        text: responseText,
+        type: 'bot',
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, botMessage]);
+      await chatHistoryService.saveMessage(botMessage);
+
+      // Show feedback option for actionable insights
+      if (isActionableInsight(responseText)) {
+        setShowFeedbackFor(botMessage.id);
+      }
+
+      console.log('✅ Response received');
+
+    } catch (error) {
+      console.error('❌ Chatbot handleSend error:', error);
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        text: "I'm having trouble analyzing your data right now. Please try again.",
+        type: 'bot',
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+      await chatHistoryService.saveMessage(errorMessage);
+    } finally {
+      setIsLoading(false);
       setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  } catch (error) {
-    console.error('Error syncing insights:', error);
-  }
-};
-
-  // 4. UPDATE YOUR handleSend FUNCTION
-const handleSend = async (queryText?: string) => {
-  const text = queryText || inputText.trim();
-  if (!text) return;
-
-  const userMessage: ChatMessage = {
-    id: Date.now().toString(),
-    text,
-    type: 'user',
-    timestamp: new Date(),
   };
 
-  setMessages((prev) => [...prev, userMessage]);
-  await chatHistoryService.saveMessage(userMessage);
-  setInputText('');
-  setIsLoading(true);
-
-  try {
-    // Learn from user's message
-    await learnFromUserResponse(text);
+  const extractTopic = (message: string): string | null => {
+    const lowerMessage = message.toLowerCase();
     
-    // Extract topic for memory
-    const topic = extractTopic(text); // Helper function below
-    if (topic) {
-      await recordDiscussedTopic(topic);
-    }
-
-    // Call chatbot with context
-    const { newHistory, responseText } = await getChatbotResponse(
-      text, 
-      apiHistory,
-      userContext // Pass context to Gemini
-    );
-
-    setApiHistory(newHistory);
-
-    const botMessage: ChatMessage = {
-      id: (Date.now() + 1).toString(),
-      text: responseText,
-      type: 'bot',
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, botMessage]);
-    await chatHistoryService.saveMessage(botMessage);
-
-    // Show feedback option for actionable insights
-    if (isActionableInsight(responseText)) {
-      setShowFeedbackFor(botMessage.id);
-    }
-
-  } catch (error) {
-    console.error('Chatbot handleSend error:', error);
-    const errorMessage: ChatMessage = {
-      id: (Date.now() + 1).toString(),
-      text: "I'm having trouble analyzing your data right now. Please try again.",
-      type: 'bot',
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, errorMessage]);
-    await chatHistoryService.saveMessage(errorMessage);
-  } finally {
-    setIsLoading(false);
-    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
-  }
-};
-
-const extractTopic = (message: string): string | null => {
-  const lowerMessage = message.toLowerCase();
-  
-  if (lowerMessage.includes('food') || lowerMessage.includes('eating')) return 'food_spending';
-  if (lowerMessage.includes('transport') || lowerMessage.includes('taxi') || lowerMessage.includes('uber')) return 'transportation';
-  if (lowerMessage.includes('rent') || lowerMessage.includes('housing')) return 'housing';
-  if (lowerMessage.includes('save') || lowerMessage.includes('saving')) return 'savings_goals';
-  if (lowerMessage.includes('budget')) return 'budget_planning';
-  if (lowerMessage.includes('trend') || lowerMessage.includes('pattern')) return 'spending_patterns';
-  
-  return null;
-};
-const isActionableInsight = (text: string): boolean => {
-  const actionableKeywords = [
-    'recommend',
-    'suggest',
-    'could save',
-    'try',
-    'consider',
-    'optimize',
-    'reduce',
-    'switch to',
-  ];
-  
-  return actionableKeywords.some(keyword => text.toLowerCase().includes(keyword));
-};
-
-const handleFeedback = async (messageId: string, helpful: boolean) => {
-  const message = messages.find(m => m.id === messageId);
-  if (!message) return;
-  
-  const insightType = extractTopic(message.text) || 'general_advice';
-  await recordInsightFeedback(insightType, helpful);
-  
-  setShowFeedbackFor(null);
-  
-  // Show thank you message
-  const feedbackMessage: ChatMessage = {
-    id: Date.now().toString(),
-    text: helpful ? 
-      "Thanks for the feedback! I'll keep this in mind for future suggestions." :
-      "Thanks for letting me know. I'll adjust my recommendations.",
-    type: 'bot',
-    timestamp: new Date(),
+    if (lowerMessage.includes('food') || lowerMessage.includes('eating')) return 'food_spending';
+    if (lowerMessage.includes('transport') || lowerMessage.includes('taxi') || lowerMessage.includes('uber')) return 'transportation';
+    if (lowerMessage.includes('rent') || lowerMessage.includes('housing')) return 'housing';
+    if (lowerMessage.includes('save') || lowerMessage.includes('saving')) return 'savings_goals';
+    if (lowerMessage.includes('budget')) return 'budget_planning';
+    if (lowerMessage.includes('trend') || lowerMessage.includes('pattern')) return 'spending_patterns';
+    
+    return null;
   };
-  
-  setMessages((prev) => [...prev, feedbackMessage]);
-  await chatHistoryService.saveMessage(feedbackMessage);
-};
+
+  const isActionableInsight = (text: string): boolean => {
+    const actionableKeywords = [
+      'recommend',
+      'suggest',
+      'could save',
+      'try',
+      'consider',
+      'optimize',
+      'reduce',
+      'switch to',
+    ];
+    
+    return actionableKeywords.some(keyword => text.toLowerCase().includes(keyword));
+  };
+
+  const handleFeedback = async (messageId: string, helpful: boolean) => {
+    const message = messages.find(m => m.id === messageId);
+    if (!message) return;
+    
+    const insightType = extractTopic(message.text) || 'general_advice';
+    await recordInsightFeedback(insightType, helpful);
+    
+    setShowFeedbackFor(null);
+    
+    // Show thank you message
+    const feedbackMessage: ChatMessage = {
+      id: Date.now().toString(),
+      text: helpful ? 
+        "Thanks for the feedback! I'll keep this in mind for future suggestions." :
+        "Thanks for letting me know. I'll adjust my recommendations.",
+      type: 'bot',
+      timestamp: new Date(),
+    };
+    
+    setMessages((prev) => [...prev, feedbackMessage]);
+    await chatHistoryService.saveMessage(feedbackMessage);
+  };
 
   const renderMessage = (message: ChatMessage) => {
-  if (message.type === 'user') {
-    // ... your existing user message rendering
-  }
-
-  if (message.type === 'bot') {
-    return (
-      <View key={message.id}>
-        <View style={[styles.messageContainer, styles.botMessage]}>
+    if (message.type === 'user') {
+      return (
+        <View key={message.id} style={[styles.messageContainer, styles.userMessage]}>
           <View style={styles.messageHeader}>
-            <Bot size={16} color="#10b981" />
-            <Text style={styles.messageTime}>
+            <User size={16} color="#ffffff" />
+            <Text style={[styles.messageTime, { color: '#e0e7ff' }]}>
               {message.timestamp
                 ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                 : ""}
             </Text>
           </View>
-          <Text style={styles.messageText}>{message.text}</Text>
+          <Text style={[styles.messageText, { color: '#ffffff' }]}>{message.text}</Text>
         </View>
-        
-        {/* FEEDBACK BUTTONS */}
-        {showFeedbackFor === message.id && (
-          <View style={styles.feedbackContainer}>
-            <Text style={styles.feedbackPrompt}>Was this helpful?</Text>
-            <View style={styles.feedbackButtons}>
-              <TouchableOpacity
-                style={[styles.feedbackButton, styles.feedbackYes]}
-                onPress={() => handleFeedback(message.id, true)}
-              >
-                <Text style={styles.feedbackButtonText}>👍 Yes</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.feedbackButton, styles.feedbackNo]}
-                onPress={() => handleFeedback(message.id, false)}
-              >
-                <Text style={styles.feedbackButtonText}>👎 No</Text>
-              </TouchableOpacity>
+      );
+    }
+
+    if (message.type === 'bot') {
+      return (
+        <View key={message.id}>
+          <View style={[styles.messageContainer, styles.botMessage]}>
+            <View style={styles.messageHeader}>
+              <Bot size={16} color="#10b981" />
+              <Text style={styles.messageTime}>
+                {message.timestamp
+                  ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                  : ""}
+              </Text>
             </View>
+            <Text style={styles.messageText}>{message.text}</Text>
           </View>
-        )}
-      </View>
-    );
-  }
+          
+          {/* FEEDBACK BUTTONS */}
+          {showFeedbackFor === message.id && (
+            <View style={styles.feedbackContainer}>
+              <Text style={styles.feedbackPrompt}>Was this helpful?</Text>
+              <View style={styles.feedbackButtons}>
+                <TouchableOpacity
+                  style={[styles.feedbackButton, styles.feedbackYes]}
+                  onPress={() => handleFeedback(message.id, true)}
+                >
+                  <Text style={styles.feedbackButtonText}>👍 Yes</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.feedbackButton, styles.feedbackNo]}
+                  onPress={() => handleFeedback(message.id, false)}
+                >
+                  <Text style={styles.feedbackButtonText}>👎 No</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+      );
+    }
+
     // Auto-generated insight
     if (message.type === 'insight' && message.insightData) {
       const { insightType, severity, title } = message.insightData;
@@ -369,8 +404,8 @@ const handleFeedback = async (messageId: string, helpful: boolean) => {
             <Text style={[styles.insightText, { color: severityStyle.text }]}>{message.text}</Text>
             <Text style={[styles.insightTime, { color: severityStyle.text }]}>
               {message.timestamp
-    ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : ""}
+                ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                : ""}
             </Text>
           </View>
         </View>
@@ -428,32 +463,33 @@ const handleFeedback = async (messageId: string, helpful: boolean) => {
             </TouchableOpacity>
           ))}
         </ScrollView>
-
+<TouchableOpacity onPress={clearAllData}>
+  <Text>Clear All Data</Text>
+</TouchableOpacity>
         {/* Messages */}
-<ScrollView
-  ref={scrollViewRef}
-  style={styles.messagesContainer}
-  contentContainerStyle={styles.messagesContent}
-  showsVerticalScrollIndicator={false}
-  onScroll={({ nativeEvent }) => {
-    if (nativeEvent.contentOffset.y <= 0) {
-      loadOlderMessages();
-    }
-  }}
-  scrollEventThrottle={100}
->
-  {isLoadingHistory && hasMore && (
-    <ActivityIndicator size="small" color="#10b981" style={{ marginBottom: 10 }} />
-  )}
-  {messages.map(renderMessage)}
-  {isLoading && (
-    <View style={styles.loadingMessageContainer}>
-      <ActivityIndicator size="small" color="#10b981" />
-      <Text style={styles.loadingMessageText}>Analyzing your data...</Text>
-    </View>
-  )}
-</ScrollView>
-
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.messagesContainer}
+          contentContainerStyle={styles.messagesContent}
+          showsVerticalScrollIndicator={false}
+          onScroll={({ nativeEvent }) => {
+            if (nativeEvent.contentOffset.y <= 0) {
+              loadOlderMessages();
+            }
+          }}
+          scrollEventThrottle={100}
+        >
+          {isLoadingHistory && hasMore && (
+            <ActivityIndicator size="small" color="#10b981" style={{ marginBottom: 10 }} />
+          )}
+          {messages.map(renderMessage)}
+          {isLoading && (
+            <View style={styles.loadingMessageContainer}>
+              <ActivityIndicator size="small" color="#10b981" />
+              <Text style={styles.loadingMessageText}>Analyzing your data...</Text>
+            </View>
+          )}
+        </ScrollView>
 
         {/* Input */}
         <View style={styles.inputContainer}>
@@ -682,4 +718,3 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
 });
-
