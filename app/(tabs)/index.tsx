@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
 });
 
 // ✅ Delete Expense function (optional)
-const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL
+const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!
 
 // ✅ Add this helper function after imports or constants
 const sendToGoogle = async (payload: any) => {

@@ -26,8 +26,7 @@ export const syncEmitter = new TinyEmitter();
 
 
 const QUEUE_KEY = 'pendingSyncs';
-const GOOGLE_SHEET_URL =
-  process.env.EXPO_PUBLIC_GOOGLE_SHEET_URL
+const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!
 
 // -----------------------------------------------------------------------------
 // 1️⃣ Add to local queue (non-blocking)
