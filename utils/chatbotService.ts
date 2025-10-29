@@ -199,6 +199,102 @@ const tools = [
           required: [],
         },
       },
+
+      {
+        name: 'analyze_spending_behavior',
+        description: 'Deep behavioral analysis: timing patterns (when you spend most), psychological triggers (what leads to spending), and spending psychology (small vs large purchases). Use this to understand WHY the user spends.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            period: {
+              type: 'STRING',
+              description: "Time period to analyze. Defaults to 'last_30_days'",
+            },
+            focus_area: {
+              type: 'STRING',
+              description: "Focus area: 'timing' (when they spend), 'triggers' (what causes spending), 'psychology' (spending patterns), or 'all'",
+            },
+          },
+          required: [],
+        },
+      },
+      
+      {
+        name: 'compare_alternatives',
+        description: 'Show cheaper alternatives based on actual usage patterns. Compares current spending (e.g., taxi) with alternatives (e.g., public transport) including trade-offs (time, comfort, etc.). Use when user asks how to save money in a specific category.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            category: {
+              type: 'STRING',
+              description: "Category to find alternatives for (e.g., 'Transportation', 'Food')",
+            },
+            period: {
+              type: 'STRING',
+              description: "Time period to analyze. Defaults to 'this_month'",
+            },
+          },
+          required: ['category'],
+        },
+      },
+      
+      {
+        name: 'forecast_spending',
+        description: 'Predict future spending with confidence intervals. Projects month-end total based on current pace, shows category-wise forecasts, and warns if overspending is likely. Use for "Am I on track?" or "How much will I spend this month?" questions.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            projection_period: {
+              type: 'STRING',
+              description: "Period to forecast: 'this_month', 'next_month', 'rest_of_year'",
+            },
+          },
+          required: [],
+        },
+      },
+      
+      {
+        name: 'optimize_budget',
+        description: 'AI-powered budget optimization. Provides multiple strategies to reduce spending, actionable steps ranked by effort and impact, and respects user constraints. Use when user asks "How can I save money?" or "I need to cut ₹5000 from my budget".',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            goal: {
+              type: 'STRING',
+              description: "Optimization goal: 'save_money', 'balance', 'reduce_category'",
+            },
+            target_amount: {
+              type: 'NUMBER',
+              description: 'Amount to save/reduce (in rupees)',
+            },
+            constraints: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: "Categories to protect from cuts, e.g., ['keep_food', 'keep_transport']",
+            },
+          },
+          required: ['goal'],
+        },
+      },
+      
+      {
+        name: 'detect_anomalies',
+        description: 'Detect unusual spending patterns and outlier transactions with context. Identifies suspicious patterns (e.g., rapid successive purchases), rare category spending, and transactions significantly above average. Use for "Any unusual spending?" or to proactively alert user.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            sensitivity: {
+              type: 'STRING',
+              description: "Detection sensitivity: 'low' (only major outliers), 'medium' (balanced), 'high' (flag more anomalies)",
+            },
+            period: {
+              type: 'STRING',
+              description: "Time period to analyze. Defaults to 'last_30_days'",
+            },
+          },
+          required: [],
+        },
+      },
     ],
   },
 ];
@@ -212,45 +308,60 @@ const tools = [
  */
 export async function getChatbotResponse(
   userQuery: string,
-  chatHistory: Content[] // Pass the existing chat history
+  chatHistory: Content[],
+  userContext: string = '' // Optional with default
 ): Promise<{ newHistory: Content[]; responseText: string }> {
   
   const systemPrompt: Part = {
-    text: `You are an intelligent personal finance assistant analyzing user spending data from their Google Sheet.
+    text: `You are an intelligent personal finance assistant and behavioral analyst. You don't just report numbers - you provide deep insights and actionable recommendations.
 
-  You have access to 8 powerful tools:
+🎯 YOUR CAPABILITIES (13 Tools):
 
-  BASIC TOOLS:
-  1. get_spending_trend - Compare current period vs previous period spending
-  2. get_top_categories - Get top spending categories for a period
-  3. get_category_vs_average - Compare current month to 3-month average by category
-  4. get_impulse_purchases - Analyze impulse purchase spending
+BASIC ANALYSIS (8 tools):
+1. get_spending_trend - Compare periods
+2. get_top_categories - Top spending areas
+3. get_category_vs_average - Historical comparison
+4. get_impulse_purchases - Impulse spending analysis
+5. filter_expenses - Advanced filtering
+6. compare_time_periods - Multi-period comparison
+7. analyze_spending_patterns - Pattern detection
+8. get_expense_statistics - Statistical analysis
 
-  ADVANCED TOOLS:
-  5. filter_expenses - Filter expenses by multiple criteria (period, categories, amount range, payment method, labels)
-  6. compare_time_periods - Compare multiple time periods side-by-side
-  7. analyze_spending_patterns - Find patterns: day-of-week spending, outliers, recurring expenses
-  8. get_expense_statistics - Get comprehensive statistics (avg, median, min, max, breakdowns)
+ADVANCED INTELLIGENCE (5 tools):
+9. analyze_spending_behavior - WHY they spend (timing, triggers, psychology)
+10. compare_alternatives - Show cheaper options with trade-offs
+11. forecast_spending - Predict future spending with confidence
+12. optimize_budget - AI-powered budget optimization strategies
+13. detect_anomalies - Find unusual patterns and outliers
 
-  Guidelines:
-  - Use multiple tools when needed for thorough analysis
-  - Provide specific numbers, percentages, and actionable insights
-  - Identify unusual patterns or concerning trends
-  - Be conversational but data-driven
-  - For vague queries, use relevant tools to provide data-backed starting points
-  - Today's date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+💡 HOW TO BE HELPFUL:
 
-  Always use tools to get actual data before answering spending questions.`
+When user asks vague questions:
+- "Why am I broke?" → Use forecast_spending + optimize_budget + analyze_spending_behavior
+- "Help me save money" → Use compare_alternatives + optimize_budget
+- "Am I doing okay?" → Use get_spending_trend + forecast_spending + detect_anomalies
+- "Any problems?" → Use detect_anomalies + analyze_spending_behavior
+
+Be conversational and empathetic:
+❌ BAD: "Your spending is ₹14,335"
+✅ GOOD: "You've spent ₹14,335 in just 4 days - that's concerning. The main issue is ₹10,500 (73%) went to rent at TWO locations. Let's address this first."
+
+Always provide context and action steps:
+- Numbers WITH meaning ("₹150 tea = ₹4,500/month = could save for emergency fund")
+- Specific recommendations ("Use train instead of taxi for non-urgent trips")
+- Trade-offs explained ("Public transport saves ₹500/week but adds 30min/day")
+
+Current date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+
+Remember: You're a financial coach, not just a calculator. Help users understand their behavior and make better decisions.`
   };
 
-  // 1. Add the user's new message to the history
   const historyWithUserQuery: Content[] = [
     ...chatHistory,
     { role: 'user', parts: [{ text: userQuery }] },
   ];
 
   try {
-    // 2. === FIRST GEMINI CALL: Check for Tool Use ===
     const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
@@ -258,14 +369,16 @@ export async function getChatbotResponse(
       },
       body: JSON.stringify({
         contents: [
-          // Send system prompt ONLY if history is empty
-          ...(chatHistory.length === 0 ? [{ role: 'user' as const, parts: [systemPrompt] }, { role: 'model' as const, parts: [{ text: "Understood. I am ready to help you analyze your expenses. What would you like to know?"}] }] : []),
+          ...(chatHistory.length === 0 ? [
+            { role: 'user' as const, parts: [systemPrompt] }, 
+            { role: 'model' as const, parts: [{ text: "Understood. I'm ready to help you analyze your expenses and make better financial decisions. What would you like to know?"}] }
+          ] : []),
           ...historyWithUserQuery
         ],
         tools: tools,
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1000,
+          maxOutputTokens: 2000,
         },
       }),
     });
@@ -281,23 +394,17 @@ export async function getChatbotResponse(
       throw new Error("Invalid response from Gemini.");
     }
 
-    // 3. === DECISION: Is it a Tool Call or a Text Response? ===
-
     if (modelResponsePart.functionCall) {
-      // --- CASE A: GEMINI WANTS TO USE A TOOL ---
       const functionCall = modelResponsePart.functionCall as FunctionCall;
       console.log('Gemini requested tool call:', functionCall.name, functionCall.args);
 
-      // Add Gemini's function call to history
       const historyWithFunctionCall: Content[] = [
         ...historyWithUserQuery,
         { role: 'model', parts: [{ functionCall: functionCall }] }
       ];
 
-      // 4. --- EXECUTE THE TOOL (Call Google Apps Script) ---
       const toolResult = await callGoogleAppsScript(functionCall);
 
-      // 5. --- SECOND GEMINI CALL: Send Tool Result Back ---
       const finalResponse = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
         method: 'POST',
         headers: {
@@ -305,8 +412,10 @@ export async function getChatbotResponse(
         },
         body: JSON.stringify({
           contents: [
-            // Send the *entire* history again, now with the function response
-            ...(chatHistory.length === 0 ? [{ role: 'user' as const, parts: [systemPrompt] }, { role: 'model' as const, parts: [{ text: "Understood. I am ready to help you analyze your expenses. What would you like to know?"}] }] : []),
+            ...(chatHistory.length === 0 ? [
+              { role: 'user' as const, parts: [systemPrompt] }, 
+              { role: 'model' as const, parts: [{ text: "Understood. I'm ready to help you analyze your expenses and make better financial decisions. What would you like to know?"}] }
+            ] : []),
             ...historyWithFunctionCall,
             {
               role: 'function',
@@ -318,7 +427,7 @@ export async function getChatbotResponse(
               }]
             }
           ],
-          tools: tools, // Send tools again
+          tools: tools,
         }),
       });
 
@@ -329,7 +438,6 @@ export async function getChatbotResponse(
       const finalData = await finalResponse.json();
       const finalResponseText = finalData.candidates?.[0]?.content?.parts?.[0]?.text || "I found the data, but couldn't formulate a response.";
       
-      // Return the complete new history and the final text
       return {
         newHistory: [
           ...historyWithFunctionCall,
@@ -340,8 +448,6 @@ export async function getChatbotResponse(
       };
 
     } else if (modelResponsePart.text) {
-      // --- CASE B: GEMINI GAVE A TEXT RESPONSE ---
-      // (e.g., "Hello!", or "Which category are you asking about?")
       const responseText = modelResponsePart.text;
       
       return {
@@ -403,15 +509,12 @@ async function callGoogleAppsScript(functionCall: FunctionCall): Promise<Record<
   } catch (error) {
     console.error('Error calling Google Apps Script:', error);
 
-    // --- THIS IS THE FIX ---
-    // Handle the 'unknown' error type
     let errorMessage = "An unknown error occurred while calling Google Apps Script.";
     if (error instanceof Error) {
       errorMessage = error.message;
     } else if (typeof error === 'string') {
       errorMessage = error;
     }
-    // -----------------------
 
     return { success: false, error: errorMessage };
   }
