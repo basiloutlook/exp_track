@@ -8,6 +8,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
 } from 'react-native';
 import { deleteExpenseFromGoogleSheet } from '@/utils/googleSheets';
 import { useAlerts } from "@/hooks/useAlerts";
@@ -22,7 +23,6 @@ import { Filter, Trash2, TrendingUp, Calendar, X, ChevronDown, ChevronUp, ArrowU
 import StatCard from '@/components/StatCard';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 const DateTimePickerModal = require('react-native-modal-datetime-picker').default;
-import { activateKeepAwakeAsync } from 'expo-keep-awake';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Quarter {
@@ -846,6 +846,7 @@ export default function Dashboard() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const { currentAlert, dismissCurrentAlert } = useAlerts(expenses);
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filters, setFilters] = useState<any>({ ...defaultFilters });
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedCategoryForDrill, setSelectedCategoryForDrill] = useState<string | null>(null);
@@ -859,14 +860,30 @@ export default function Dashboard() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const router = useRouter();
 
-  const loadExpenses = useCallback(async () => {
+  const loadExpenses = useCallback(async (forceRefresh = false) => {
     setIsLoading(true);
     try {
-      await storageService.invalidateCache();
-      const sheetExpenses = await getExpensesFromGoogleSheet();
-      const hasSheetData = Array.isArray(sheetExpenses) && sheetExpenses.length > 0;
-      const data = hasSheetData ? sheetExpenses : (await storageService.getExpenses() || []);
-      setExpenses(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      // Only invalidate cache if explicitly requested
+      if (forceRefresh) {
+        await storageService.invalidateCache();
+      }
+      
+      // Try local storage first (fast)
+      const localExpenses = await storageService.getExpenses();
+      
+      if (localExpenses && localExpenses.length > 0 && !forceRefresh) {
+        setExpenses(localExpenses.sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        ));
+        setIsLoading(false);
+      } else {
+        // No local data or force refresh - fetch from sheets
+        const sheetExpenses = await getExpensesFromGoogleSheet();
+        const data = sheetExpenses || [];
+        setExpenses(data.sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        ));
+      }
     } catch (error) {
       console.error("loadExpenses error:", error);
       Alert.alert('Error', 'Failed to load expenses');
@@ -875,10 +892,20 @@ export default function Dashboard() {
     }
   }, []);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadExpenses(true); // Force refresh from Google Sheets
+    await refreshNotifications();
+    setRefreshing(false);
+  }, [loadExpenses, refreshNotifications]);
+  
   useFocusEffect(
     useCallback(() => {
-      loadExpenses();
-    }, [loadExpenses])
+      // Only load if expenses are empty
+      if (expenses.length === 0) {
+        loadExpenses(false);
+      }
+    }, [expenses.length])
   );
   
   useEffect(() => {
@@ -904,7 +931,7 @@ useEffect(() => {
             try {
               await deleteExpenseFromGoogleSheet(id);
               await storageService.deleteExpense(id);
-              await loadExpenses();
+              await loadExpenses(true); // Force refresh after delete
               Alert.alert('Success', 'Expense deleted successfully!');
             } catch (error) {
               console.error('Error deleting expense:', error);
@@ -1418,6 +1445,14 @@ return (
         style={styles.scrollView}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={['#2563eb']} // Android
+            tintColor="#2563eb" // iOS
+          />
+        }
       >
         {hasActiveDrillDown && (
           <View style={styles.drillDownIndicator}>

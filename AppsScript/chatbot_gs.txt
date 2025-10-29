@@ -1,390 +1,506 @@
+/*******************************************************
+ * chatbot.gs
+ * - All chatbot tool handling logic
+ * - Tool implementations for Gemini function calling
+ * - Called by main.gs when functionCall is detected
+ *******************************************************/
+
 /**
- * IMPROVED processChatbotQuery - Much smarter query handling
- * Replace your existing function with this
+ * handleToolCall - Router for all Gemini function calls.
+ * This function is called from main.gs doPost handler.
  */
-function processChatbotQuery(query) {
-  const sheet = getSheet(SHEETS.EXPENSES);
-  if (!sheet) return { success: false, message: 'No expense data found' };
+function handleToolCall(toolCall) {
+  const { name, args } = toolCall;
 
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const rows = data.slice(1);
+  // Get expense data using the getExpenses() function from main.gs
+  const expensesData = getExpenses(); 
 
-  // Parse expenses
-  const expenses = rows.map(row => {
-    const obj = {};
-    headers.forEach((header, idx) => {
-      obj[header] = row[idx];
-    });
-    return obj;
+  // Convert date strings back to Date objects for processing
+  const data = expensesData.map(e => {
+    e.date = new Date(e.date); 
+    e.amount = parseFloat(e.amount); 
+    e.labels = Array.isArray(e.labels) ? e.labels : parseLabels(e.labels);
+    return e;
   });
 
-  const lowerQuery = query.toLowerCase();
+  Logger.log(`Handling tool call: ${name} with args: ${JSON.stringify(args)}`);
+
+  try {
+    switch (name) {
+      // BASIC TOOLS
+      case 'get_spending_trend':
+        return _getSpendingTrend(data, args);
+        
+      case 'get_top_categories':
+        return _getTopCategories(data, args);
+        
+      case 'get_category_vs_average':
+        return _getCategoryVsAverage(data, args);
+        
+      case 'get_impulse_purchases':
+        return _getImpulsePurchases(data, args);
+
+      // ADVANCED TOOLS
+      case 'filter_expenses':
+        return _filterExpenses(data, args);
+      
+      case 'compare_time_periods':
+        return _compareTimePeriods(data, args);
+      
+      case 'analyze_spending_patterns':
+        return _analyzeSpendingPatterns(data, args);
+      
+      case 'get_expense_statistics':
+        return _getExpenseStatistics(data, args);
+
+      default:
+        throw new Error(`Unknown tool name: ${name}`);
+    }
+  } catch (err) {
+    Logger.log(`Tool execution error: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+}
+
+// ===========================================
+// HELPER FUNCTIONS
+// ===========================================
+
+/**
+ * Enhanced period filtering with support for multiple time periods
+ */
+function _filterByPeriod(expenses, period, customStart, customEnd) {
+  const now = new Date();
+  
+  if (customStart && customEnd) {
+    const start = new Date(customStart);
+    const end = new Date(customEnd);
+    return expenses.filter(e => e.date >= start && e.date <= end);
+  }
+  
+  switch (period) {
+    case 'today':
+      return expenses.filter(e => 
+        e.date.toDateString() === now.toDateString()
+      );
+    
+    case 'this_week':
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - now.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+      return expenses.filter(e => e.date >= weekStart);
+    
+    case 'last_week':
+      const lastWeekStart = new Date(now);
+      lastWeekStart.setDate(now.getDate() - now.getDay() - 7);
+      lastWeekStart.setHours(0, 0, 0, 0);
+      const lastWeekEnd = new Date(lastWeekStart);
+      lastWeekEnd.setDate(lastWeekStart.getDate() + 7);
+      return expenses.filter(e => e.date >= lastWeekStart && e.date < lastWeekEnd);
+    
+    case 'this_month':
+      return expenses.filter(e => 
+        e.date.getMonth() === now.getMonth() && 
+        e.date.getFullYear() === now.getFullYear()
+      );
+    
+    case 'last_month':
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return expenses.filter(e => 
+        e.date.getMonth() === lastMonth.getMonth() && 
+        e.date.getFullYear() === lastMonth.getFullYear()
+      );
+    
+    case 'last_3_months':
+      const threeMonthsAgo = new Date(now);
+      threeMonthsAgo.setMonth(now.getMonth() - 3);
+      return expenses.filter(e => e.date >= threeMonthsAgo);
+    
+    case 'last_6_months':
+      const sixMonthsAgo = new Date(now);
+      sixMonthsAgo.setMonth(now.getMonth() - 6);
+      return expenses.filter(e => e.date >= sixMonthsAgo);
+    
+    case 'this_year':
+      return expenses.filter(e => e.date.getFullYear() === now.getFullYear());
+    
+    case 'last_30_days':
+      const thirtyDaysAgo = new Date(now);
+      thirtyDaysAgo.setDate(now.getDate() - 30);
+      return expenses.filter(e => e.date >= thirtyDaysAgo);
+    
+    default:
+      return expenses;
+  }
+}
+
+// ===========================================
+// BASIC TOOL IMPLEMENTATIONS
+// ===========================================
+
+/**
+ * TOOL 1: Get spending trend (this month vs last month)
+ */
+function _getSpendingTrend(allExpenses, args) {
+  const period = args.period || 'this_month';
+  const currentPeriodExpenses = _filterByPeriod(allExpenses, period);
+  const lastPeriodExpenses = _filterByPeriod(allExpenses, 'last_month');
+  
+  const currentTotal = currentPeriodExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const lastPeriodTotal = lastPeriodExpenses.reduce((sum, e) => sum + e.amount, 0);
+  
+  let changePercent = 0;
+  if (lastPeriodTotal > 0) {
+    changePercent = ((currentTotal - lastPeriodTotal) / lastPeriodTotal) * 100;
+  }
+  
+  return {
+    success: true,
+    period: period,
+    totalSpent: currentTotal,
+    transactionCount: currentPeriodExpenses.length,
+    comparedToPeriod: 'last_month',
+    lastPeriodTotal: lastPeriodTotal,
+    changePercent: changePercent
+  };
+}
+
+/**
+ * TOOL 2: Get top N spending categories
+ */
+function _getTopCategories(allExpenses, args) {
+  const period = args.period || 'this_month';
+  const count = args.count || 3;
+  const expenses = _filterByPeriod(allExpenses, period);
+  const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+  
+  const categoryMap = {};
+  expenses.forEach(e => {
+    const cat = e.category || 'Uncategorized';
+    categoryMap[cat] = (categoryMap[cat] || 0) + e.amount;
+  });
+  
+  const sortedCategories = Object.entries(categoryMap)
+    .map(([category, amount]) => ({
+      category,
+      amount,
+      percentage: totalSpent > 0 ? (amount / totalSpent) * 100 : 0
+    }))
+    .sort((a, b) => b.amount - a.amount);
+    
+  return {
+    success: true,
+    period: period,
+    topCategories: sortedCategories.slice(0, count),
+    totalCategories: sortedCategories.length,
+    totalSpent: totalSpent
+  };
+}
+
+/**
+ * TOOL 3: Compare current month categories to 3-month average
+ */
+function _getCategoryVsAverage(allExpenses, args) {
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
-  // Filter current month expenses
-  const currentMonthExpenses = expenses.filter(e => {
-    const expenseDate = new Date(e.Date);
-    return expenseDate.getMonth() === currentMonth && 
-           expenseDate.getFullYear() === currentYear;
+  const currentMonthExpenses = _filterByPeriod(allExpenses, 'this_month');
+  const currentCategoryTotals = {};
+  currentMonthExpenses.forEach(e => {
+    const cat = e.category || 'Uncategorized';
+    currentCategoryTotals[cat] = (currentCategoryTotals[cat] || 0) + e.amount;
   });
 
-  // ===========================================
-  // 1. CATEGORY VS 3-MONTH AVERAGE COMPARISON
-  // ===========================================
-  if ((lowerQuery.includes('category') || lowerQuery.includes('categories')) && 
-      (lowerQuery.includes('higher') || lowerQuery.includes('above') || lowerQuery.includes('exceed')) && 
-      (lowerQuery.includes('average') || lowerQuery.includes('avg'))) {
+  const last3MonthsCategoryTotals = {};
+  for (let i = 1; i <= 3; i++) {
+    const targetMonthDate = new Date(currentYear, currentMonth - i, 1);
+    const monthKey = targetMonthDate.getMonth();
+    const yearKey = targetMonthDate.getFullYear();
     
-    // Current month category totals
-    const currentCategoryTotals = {};
-    currentMonthExpenses.forEach(e => {
-      const cat = e.Category || 'Uncategorized';
-      currentCategoryTotals[cat] = (currentCategoryTotals[cat] || 0) + parseFloat(e.Amount || 0);
-    });
-
-    // Last 3 months category totals
-    const last3MonthsCategoryData = {};
-    for (let i = 1; i <= 3; i++) {
-      const targetMonth = new Date(currentYear, currentMonth - i, 1);
-      const monthExpenses = expenses.filter(e => {
-        const d = new Date(e.Date);
-        return d.getMonth() === targetMonth.getMonth() && 
-               d.getFullYear() === targetMonth.getFullYear();
-      });
-      
-      monthExpenses.forEach(e => {
-        const cat = e.Category || 'Uncategorized';
-        if (!last3MonthsCategoryData[cat]) {
-          last3MonthsCategoryData[cat] = [];
-        }
-        last3MonthsCategoryData[cat].push(parseFloat(e.Amount || 0));
-      });
-    }
-
-    // Calculate 3-month averages per category
-    const categoryAverages = {};
-    Object.keys(last3MonthsCategoryData).forEach(cat => {
-      const amounts = last3MonthsCategoryData[cat];
-      const monthTotals = {};
-      
-      // Group by month
-      for (let i = 1; i <= 3; i++) {
-        const targetMonth = new Date(currentYear, currentMonth - i, 1);
-        const monthKey = `${targetMonth.getMonth()}-${targetMonth.getFullYear()}`;
-        monthTotals[monthKey] = 0;
+    const monthExpenses = allExpenses.filter(e => 
+      e.date.getMonth() === monthKey && e.date.getFullYear() === yearKey
+    );
+    
+    monthExpenses.forEach(e => {
+      const cat = e.category || 'Uncategorized';
+      if (!last3MonthsCategoryTotals[cat]) {
+        last3MonthsCategoryTotals[cat] = {};
       }
-      
-      // Sum amounts per month for this category
-      for (let i = 1; i <= 3; i++) {
-        const targetMonth = new Date(currentYear, currentMonth - i, 1);
-        const monthKey = `${targetMonth.getMonth()}-${targetMonth.getFullYear()}`;
-        const monthExpenses = expenses.filter(e => {
-          const d = new Date(e.Date);
-          return d.getMonth() === targetMonth.getMonth() && 
-                 d.getFullYear() === targetMonth.getFullYear() &&
-                 (e.Category || 'Uncategorized') === cat;
-        });
-        monthTotals[monthKey] = monthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-      }
-      
-      const total = Object.values(monthTotals).reduce((sum, val) => sum + val, 0);
-      categoryAverages[cat] = total / 3;
+      last3MonthsCategoryTotals[cat][monthKey] = (last3MonthsCategoryTotals[cat][monthKey] || 0) + e.amount;
     });
+  }
 
-    // Compare current vs average
-    const categoriesAboveAverage = [];
-    Object.keys(currentCategoryTotals).forEach(cat => {
-      const currentTotal = currentCategoryTotals[cat];
-      const avg = categoryAverages[cat] || 0;
-      
-      if (avg > 0 && currentTotal > avg) {
-        const percentHigher = ((currentTotal - avg) / avg) * 100;
+  const categoriesAboveAverage = [];
+  Object.keys(currentCategoryTotals).forEach(cat => {
+    const currentTotal = currentCategoryTotals[cat];
+    
+    if (last3MonthsCategoryTotals[cat]) {
+      const monthlyTotals = Object.values(last3MonthsCategoryTotals[cat]);
+      const total = monthlyTotals.reduce((sum, val) => sum + val, 0);
+      const average = total / 3; 
+
+      if (currentTotal > average && average > 0) {
+        const percentHigher = ((currentTotal - average) / average) * 100;
         categoriesAboveAverage.push({
           category: cat,
-          current: currentTotal,
-          average: avg,
+          currentAmount: currentTotal,
+          averageAmount: average,
           percentHigher: percentHigher
         });
       }
-    });
-
-    // Build response
-    if (categoriesAboveAverage.length === 0) {
-      return {
-        success: true,
-        response: `✅ Good news! No categories are above their 3-month average this month. Your spending is well-balanced across all categories.`
-      };
     }
-
-    categoriesAboveAverage.sort((a, b) => b.percentHigher - a.percentHigher);
-    const topCategories = categoriesAboveAverage.slice(0, 5);
-    
-    let response = `📊 Yes, ${categoriesAboveAverage.length} ${categoriesAboveAverage.length === 1 ? 'category is' : 'categories are'} above their 3-month average:\n\n`;
-    
-    topCategories.forEach((cat, idx) => {
-      const icon = idx === 0 ? '🔴' : (idx === 1 ? '🟠' : '🟡');
-      response += `${icon} ${cat.category}: ₹${cat.current.toFixed(2)}\n`;
-      response += `   (Avg: ₹${cat.average.toFixed(2)}, +${cat.percentHigher.toFixed(1)}%)\n\n`;
-    });
-    
-    if (categoriesAboveAverage.length > 5) {
-      response += `...and ${categoriesAboveAverage.length - 5} more categories above average.`;
-    }
-    
-    return { success: true, response: response.trim() };
-  }
-
-  // ===========================================
-  // 2. SPENDING TREND ANALYSIS
-  // ===========================================
-  if (lowerQuery.includes('trend') || lowerQuery.includes('pattern') || lowerQuery.includes('spending this month')) {
-    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    const avgDaily = totalSpent / now.getDate();
-
-    // Category breakdown
-    const categoryMap = {};
-    currentMonthExpenses.forEach(e => {
-      const cat = e.Category || 'Uncategorized';
-      categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
-    });
-    
-    const sortedCategories = Object.entries(categoryMap)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-
-    // Last month comparison
-    const lastMonth = new Date(currentYear, currentMonth - 1, 1);
-    const lastMonthExpenses = expenses.filter(e => {
-      const d = new Date(e.Date);
-      return d.getMonth() === lastMonth.getMonth() && 
-             d.getFullYear() === lastMonth.getFullYear();
-    });
-    const lastMonthTotal = lastMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    
-    let trendText = '';
-    if (lastMonthTotal > 0) {
-      const change = ((totalSpent - lastMonthTotal) / lastMonthTotal) * 100;
-      const changeIcon = change > 0 ? '📈' : '📉';
-      trendText = `\n\n${changeIcon} Compared to last month: ${change > 0 ? '+' : ''}${change.toFixed(1)}% (₹${(totalSpent - lastMonthTotal).toFixed(2)})`;
-    }
-
-    const response = `💰 This month you've spent ₹${totalSpent.toFixed(2)} across ${currentMonthExpenses.length} transactions.\n\n` +
-                    `📊 Daily average: ₹${avgDaily.toFixed(2)}\n\n` +
-                    `🏆 Top categories:\n` +
-                    sortedCategories.map(([cat, amt]) => `• ${cat}: ₹${amt.toFixed(2)}`).join('\n') +
-                    trendText;
-
-    return { success: true, response };
-  }
-
-  // ===========================================
-  // 3. TOP SPENDING CATEGORY
-  // ===========================================
-  if ((lowerQuery.includes('which') || lowerQuery.includes('what')) && 
-      (lowerQuery.includes('category') || lowerQuery.includes('categories')) && 
-      (lowerQuery.includes('most') || lowerQuery.includes('highest') || lowerQuery.includes('top'))) {
-    
-    const categoryMap = {};
-    currentMonthExpenses.forEach(e => {
-      const cat = e.Category || 'Uncategorized';
-      categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
-    });
-
-    const sorted = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
-    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    
-    let response = `🏆 Your top spending categories this month:\n\n`;
-    sorted.slice(0, 5).forEach(([cat, amt], idx) => {
-      const percentage = ((amt / totalSpent) * 100).toFixed(1);
-      const icon = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : '•'));
-      response += `${icon} ${cat}: ₹${amt.toFixed(2)} (${percentage}%)\n`;
-    });
-
-    return { success: true, response };
-  }
-
-  // ===========================================
-  // 4. TOTAL SPENDING
-  // ===========================================
-  if (lowerQuery.includes('total') || lowerQuery.includes('how much') || lowerQuery.includes('spent')) {
-    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    const numCategories = new Set(currentMonthExpenses.map(e => e.Category)).size;
-    const avgDaily = totalSpent / now.getDate();
-
-    return {
-      success: true,
-      response: `💰 This month you've spent ₹${totalSpent.toFixed(2)} across ${numCategories} categories and ${currentMonthExpenses.length} transactions.\n\n📊 Daily average: ₹${avgDaily.toFixed(2)}`
-    };
-  }
-
-  // ===========================================
-  // 5. WEEK COMPARISON
-  // ===========================================
-  if (lowerQuery.includes('week') && (lowerQuery.includes('compare') || lowerQuery.includes('last') || lowerQuery.includes('this'))) {
-    const weekAgo = new Date(now);
-    weekAgo.setDate(now.getDate() - 7);
-    
-    const thisWeek = currentMonthExpenses.filter(e => {
-      const d = new Date(e.Date);
-      return d >= weekAgo && d <= now;
-    });
-    const thisWeekTotal = thisWeek.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-
-    const twoWeeksAgo = new Date(now);
-    twoWeeksAgo.setDate(now.getDate() - 14);
-    
-    const lastWeek = currentMonthExpenses.filter(e => {
-      const d = new Date(e.Date);
-      return d >= twoWeeksAgo && d < weekAgo;
-    });
-    const lastWeekTotal = lastWeek.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-
-    if (lastWeekTotal === 0) {
-      return {
-        success: true,
-        response: `📊 This week's spending: ₹${thisWeekTotal.toFixed(2)} (${thisWeek.length} transactions)\n\nNo data available for last week to compare.`
-      };
-    }
-
-    const change = ((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100;
-    const changeIcon = change > 0 ? '📈' : '📉';
-    const changeText = change > 0 ? 'higher' : 'lower';
-
-    return {
-      success: true,
-      response: `${changeIcon} This week: ₹${thisWeekTotal.toFixed(2)} (${thisWeek.length} transactions)\n` +
-               `Last week: ₹${lastWeekTotal.toFixed(2)} (${lastWeek.length} transactions)\n\n` +
-               `Change: ${Math.abs(change).toFixed(1)}% ${changeText} (₹${Math.abs(thisWeekTotal - lastWeekTotal).toFixed(2)})`
-    };
-  }
-
-  // ===========================================
-  // 6. IMPULSE PURCHASES
-  // ===========================================
-  if (lowerQuery.includes('impulse')) {
-    const impulseExpenses = currentMonthExpenses.filter(e => {
-      const labels = (e.Labels || '').toLowerCase();
-      return labels.includes('impulse');
-    });
-    
-    const impulseTotal = impulseExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    const percentage = totalSpent > 0 ? ((impulseTotal / totalSpent) * 100).toFixed(1) : 0;
-
-    if (impulseExpenses.length === 0) {
-      return {
-        success: true,
-        response: `✅ Great job! No impulse purchases detected this month.`
-      };
-    }
-
-    // Top impulse items
-    const impulseByCategory = {};
-    impulseExpenses.forEach(e => {
-      const cat = e.Category || 'Uncategorized';
-      impulseByCategory[cat] = (impulseByCategory[cat] || 0) + parseFloat(e.Amount || 0);
-    });
-    
-    const topImpulse = Object.entries(impulseByCategory)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-
-    let response = `🛍️ Impulse purchases: ₹${impulseTotal.toFixed(2)} (${percentage}% of total)\n\n`;
-    response += `${impulseExpenses.length} impulse transactions found:\n`;
-    topImpulse.forEach(([cat, amt]) => {
-      response += `• ${cat}: ₹${amt.toFixed(2)}\n`;
-    });
-
-    if (percentage > 15) {
-      response += `\n⚠️ This is ${percentage}% of your spending. Consider setting a weekly impulse budget of ₹${(impulseTotal / 4).toFixed(2)} to reduce by 50%.`;
-    } else {
-      response += `\n✅ Good control over impulse spending!`;
-    }
-
-    return { success: true, response };
-  }
-
-  // ===========================================
-  // 7. UNUSUAL PATTERNS / ANOMALIES
-  // ===========================================
-  if (lowerQuery.includes('unusual') || lowerQuery.includes('anomaly') || lowerQuery.includes('strange') || lowerQuery.includes('weird')) {
-    const insights = [];
-    const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    const avgDaily = totalSpent / now.getDate();
-
-    // Check today's spending
-    const todayExpenses = currentMonthExpenses.filter(e => {
-      const d = new Date(e.Date);
-      return d.toDateString() === now.toDateString();
-    });
-    const todayTotal = todayExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-    
-    if (todayTotal > avgDaily * 2) {
-      insights.push(`🔴 Today's spending (₹${todayTotal.toFixed(2)}) is ${((todayTotal / avgDaily - 1) * 100).toFixed(0)}% above daily average`);
-    }
-
-    // Check spending bursts
-    const timeMap = {};
-    currentMonthExpenses.forEach(e => {
-      if (e.Timestamp) {
-        const hour = new Date(e.Timestamp).getHours();
-        const dateKey = new Date(e.Timestamp).toDateString();
-        const key = `${dateKey}-${hour}`;
-        timeMap[key] = (timeMap[key] || 0) + 1;
-      }
-    });
-    
-    const bursts = Object.entries(timeMap).filter(([_, count]) => count >= 3);
-    if (bursts.length > 0) {
-      insights.push(`⚡ Spending burst detected: ${bursts[0][1]} transactions in one hour`);
-    }
-
-    // Check vendor frequency
-    const vendorMap = {};
-    currentMonthExpenses.forEach(e => {
-      const vendor = e['Shop/Site/Person name'];
-      if (vendor) {
-        vendorMap[vendor] = (vendorMap[vendor] || 0) + 1;
-      }
-    });
-    
-    const frequentVendors = Object.entries(vendorMap).filter(([_, count]) => count >= 5);
-    if (frequentVendors.length > 0) {
-      const top = frequentVendors.sort((a, b) => b[1] - a[1])[0];
-      insights.push(`🏪 High frequency: ${top[1]} transactions at ${top[0]}`);
-    }
-
-    if (insights.length === 0) {
-      return {
-        success: true,
-        response: `✅ No unusual spending patterns detected this month. Your spending behavior looks consistent!`
-      };
-    }
-
-    return {
-      success: true,
-      response: `🔍 Unusual patterns detected:\n\n` + insights.join('\n\n')
-    };
-  }
-
-  // ===========================================
-  // 8. DEFAULT / FALLBACK
-  // ===========================================
-  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + parseFloat(e.Amount || 0), 0);
-  const categoryMap = {};
-  currentMonthExpenses.forEach(e => {
-    const cat = e.Category || 'Uncategorized';
-    categoryMap[cat] = (categoryMap[cat] || 0) + parseFloat(e.Amount || 0);
   });
-  const topCategory = Object.entries(categoryMap).sort((a, b) => b[1] - a[1])[0];
 
   return {
     success: true,
-    response: `💡 This month: ₹${totalSpent.toFixed(2)} spent across ${currentMonthExpenses.length} transactions.\n\n` +
-             `🏆 Top category: ${topCategory[0]} (₹${topCategory[1].toFixed(2)})\n\n` +
-             `Try asking:\n• "Which category did I spend most on?"\n• "Compare this week with last week"\n• "Show my impulse purchases"\n• "Are any categories above average?"`
+    categoriesAboveAverage: categoriesAboveAverage.sort((a, b) => b.percentHigher - a.percentHigher)
+  };
+}
+
+/**
+ * TOOL 4: Get spending on items labeled "Impulse"
+ */
+function _getImpulsePurchases(allExpenses, args) {
+  const period = args.period || 'this_month';
+  const expenses = _filterByPeriod(allExpenses, period);
+  
+  const impulseExpenses = expenses.filter(e => 
+    e.labels && Array.isArray(e.labels) && 
+    e.labels.some(label => label.toLowerCase() === 'impulse')
+  );
+  
+  const impulseTotal = impulseExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+  
+  const impulseCategoryMap = {};
+  impulseExpenses.forEach(e => {
+    const cat = e.category || 'Uncategorized';
+    impulseCategoryMap[cat] = (impulseCategoryMap[cat] || 0) + e.amount;
+  });
+  
+  const topImpulseCategories = Object.entries(impulseCategoryMap)
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 3);
+  
+  return {
+    success: true,
+    period: period,
+    impulseTotal: impulseTotal,
+    impulseTransactionCount: impulseExpenses.length,
+    percentageOfTotal: totalSpent > 0 ? (impulseTotal / totalSpent) * 100 : 0,
+    topImpulseCategories: topImpulseCategories
+  };
+}
+
+// ===========================================
+// ADVANCED TOOL IMPLEMENTATIONS
+// ===========================================
+
+/**
+ * TOOL 5: Flexible expense filtering
+ */
+function _filterExpenses(allExpenses, args) {
+  let filtered = allExpenses;
+  
+  if (args.period) {
+    filtered = _filterByPeriod(filtered, args.period, args.startDate, args.endDate);
+  }
+  
+  if (args.categories && args.categories.length > 0) {
+    filtered = filtered.filter(e => args.categories.includes(e.category));
+  }
+  
+  if (args.minAmount !== undefined) {
+    filtered = filtered.filter(e => e.amount >= args.minAmount);
+  }
+  if (args.maxAmount !== undefined) {
+    filtered = filtered.filter(e => e.amount <= args.maxAmount);
+  }
+  
+  if (args.paymentMethod) {
+    filtered = filtered.filter(e => e.paymentMode === args.paymentMethod);
+  }
+  
+  if (args.label) {
+    filtered = filtered.filter(e => 
+      e.labels && Array.isArray(e.labels) && 
+      e.labels.some(l => l.toLowerCase().includes(args.label.toLowerCase()))
+    );
+  }
+  
+  const sortBy = args.sortBy || 'date';
+  const sortOrder = args.sortOrder || 'desc';
+  
+  filtered.sort((a, b) => {
+    let comparison = 0;
+    if (sortBy === 'amount') {
+      comparison = a.amount - b.amount;
+    } else if (sortBy === 'date') {
+      comparison = a.date - b.date;
+    }
+    return sortOrder === 'desc' ? -comparison : comparison;
+  });
+  
+  const limit = args.limit || 100;
+  const results = filtered.slice(0, limit);
+  
+  return {
+    success: true,
+    count: results.length,
+    totalAmount: results.reduce((sum, e) => sum + e.amount, 0),
+    expenses: results.map(e => ({
+      date: Utilities.formatDate(e.date, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      category: e.category,
+      subCategory: e.subCategory,
+      item: e.item,
+      amount: e.amount,
+      shopName: e.shopName,
+      paymentMode: e.paymentMode,
+      labels: e.labels
+    }))
+  };
+}
+
+/**
+ * TOOL 6: Compare multiple time periods
+ */
+function _compareTimePeriods(allExpenses, args) {
+  const periods = args.periods || ['this_week', 'last_week'];
+  
+  const comparisons = periods.map(period => {
+    const expenses = _filterByPeriod(allExpenses, period);
+    const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+    
+    const categoryBreakdown = {};
+    expenses.forEach(e => {
+      const cat = e.category || 'Uncategorized';
+      categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + e.amount;
+    });
+    
+    return {
+      period: period,
+      totalSpent: total,
+      transactionCount: expenses.length,
+      averageTransaction: expenses.length > 0 ? total / expenses.length : 0,
+      topCategory: Object.entries(categoryBreakdown)
+        .sort((a, b) => b[1] - a[1])[0]?.[0] || 'None',
+      categoryBreakdown: categoryBreakdown
+    };
+  });
+  
+  return {
+    success: true,
+    comparisons: comparisons
+  };
+}
+
+/**
+ * TOOL 7: Analyze spending patterns
+ */
+function _analyzeSpendingPatterns(allExpenses, args) {
+  const period = args.period || 'last_30_days';
+  const expenses = _filterByPeriod(allExpenses, period);
+  
+  // Day of week analysis
+  const dayOfWeekMap = {};
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  
+  expenses.forEach(e => {
+    const day = dayNames[e.date.getDay()];
+    if (!dayOfWeekMap[day]) {
+      dayOfWeekMap[day] = { count: 0, total: 0 };
+    }
+    dayOfWeekMap[day].count++;
+    dayOfWeekMap[day].total += e.amount;
+  });
+  
+  // Calculate average and standard deviation
+  const amounts = expenses.map(e => e.amount);
+  const average = amounts.length > 0 ? amounts.reduce((sum, amt) => sum + amt, 0) / amounts.length : 0;
+  const stdDev = amounts.length > 0 ? Math.sqrt(
+    amounts.reduce((sum, amt) => sum + Math.pow(amt - average, 2), 0) / amounts.length
+  ) : 0;
+  
+  // Find outliers (transactions significantly above average)
+  const outliers = expenses.filter(e => e.amount > average + (2 * stdDev))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5)
+    .map(e => ({
+      date: Utilities.formatDate(e.date, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      category: e.category,
+      item: e.item,
+      amount: e.amount
+    }));
+  
+  // Find recurring expenses (same merchant appearing multiple times)
+  const merchantCount = {};
+  expenses.forEach(e => {
+    const key = e.shopName || e.item;
+    if (key) merchantCount[key] = (merchantCount[key] || 0) + 1;
+  });
+  
+  const recurringExpenses = Object.entries(merchantCount)
+    .filter(([_, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([merchant, count]) => ({ merchant, occurrences: count }));
+  
+  return {
+    success: true,
+    period: period,
+    dayOfWeekSpending: dayOfWeekMap,
+    averageTransaction: average,
+    standardDeviation: stdDev,
+    outlierTransactions: outliers,
+    recurringExpenses: recurringExpenses
+  };
+}
+
+/**
+ * TOOL 8: Get comprehensive statistics
+ */
+function _getExpenseStatistics(allExpenses, args) {
+  const period = args.period || 'this_month';
+  const expenses = _filterByPeriod(allExpenses, period);
+  
+  if (expenses.length === 0) {
+    return {
+      success: true,
+      period: period,
+      message: 'No expenses found for this period'
+    };
+  }
+  
+  const amounts = expenses.map(e => e.amount).sort((a, b) => a - b);
+  const total = amounts.reduce((sum, amt) => sum + amt, 0);
+  const average = total / amounts.length;
+  
+  // Calculate median
+  const mid = Math.floor(amounts.length / 2);
+  const median = amounts.length % 2 === 0 
+    ? (amounts[mid - 1] + amounts[mid]) / 2 
+    : amounts[mid];
+  
+  // Payment method breakdown
+  const paymentMethods = {};
+  expenses.forEach(e => {
+    const method = e.paymentMode || 'Unknown';
+    paymentMethods[method] = (paymentMethods[method] || 0) + e.amount;
+  });
+  
+  return {
+    success: true,
+    period: period,
+    totalSpent: total,
+    transactionCount: expenses.length,
+    average: average,
+    median: median,
+    minimum: amounts[0],
+    maximum: amounts[amounts.length - 1],
+    paymentMethodBreakdown: paymentMethods,
+    uniqueCategories: [...new Set(expenses.map(e => e.category))].length,
+    uniqueMerchants: [...new Set(expenses.map(e => e.shopName))].length
   };
 }

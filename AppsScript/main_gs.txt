@@ -2,7 +2,7 @@
  * main.gs
  * - API endpoints (doGet/doPost)
  * - Expense CRUD (add/update/delete)
- * - Trigger setup and one-time initialization
+ * - Routes chatbot requests to chatbot.gs
  *******************************************************/
 
 const SHEETS = {
@@ -14,81 +14,18 @@ const SHEETS = {
 
 const MAX_NOTIFICATIONS = 100;
 
-function doPost(e) {
-  try {
-    const data = JSON.parse(e.postData.contents || '{}');
-    const action = data.action || 'add';
-
-    // Expense CRUD actions
-    if (['add', 'update', 'delete'].includes(action)) {
-      const result = handleExpenseAction(action, data);
-
-      // After mutating expenses, run instant metrics (small subset)
-      if (result.success) {
-        Utilities.sleep(1000); // small delay to allow row writes
-        calculateInstantMetrics(); // from metricsEngine.gs
-      }
-
-      return jsonResponse(result);
-    }
-
-    // Settings & admin actions
-    if (action === 'updateSettings') return jsonResponse(updateUserSettings(data.settings || {}));
-    if (action === 'calculateMetrics') return jsonResponse(calculateAllMetrics());
-    if (action === 'getNotifications') return jsonResponse(getNotifications(data.unreadOnly));
-    if (action === 'markNotificationRead') return jsonResponse(markNotificationRead(data.id));
-    if (action === 'markNotificationDismissed') return jsonResponse(markNotificationDismissed(data.id));
-
-    // Existing chatbot actions
-    if (action === 'getChatInsights') {
-      const insights = generateExpenseInsights();
-      return jsonResponse({ success: true, insights });
-    }
-
-    if (action === 'chatQuery') {
-      const result = processChatbotQuery(data.query || '');
-      return jsonResponse(result);
-    }
-
-    // NEW: Insight delivery tracking actions
-    if (action === 'markInsightDelivered') {
-      return jsonResponse(markInsightAsDelivered(data.id));
-    }
-
-    if (action === 'generateInsights') {
-      const insights = generateExpenseInsights();
-      storeInsightsAsNotifications(insights);
-      return jsonResponse({
-        success: true,
-        count: insights.length,
-        message: `Generated ${insights.length} insights`
-      });
-    }
-   if (action === 'rerunInsights') {
-      const insights = generateExpenseInsights();
-      storeInsightsAsNotifications(insights);
-      return jsonResponse({
-        success: true,
-        count: insights.length,
-        message: `Re-ran analysis and generated ${insights.length} insights.`,
-      });
-    }
-    return jsonResponse({ success: false, message: 'Invalid action' });
-  } catch (err) {
-    return jsonResponse({ success: false, message: err.message || String(err) });
-  }
-}
-
+// ==========================================================
+// 1. GET REQUEST HANDLER (doGet)
+// ==========================================================
 function doGet(e) {
   try {
     const mode = (e.parameter.mode || 'raw').toLowerCase();
 
     if (mode === 'notifications') return jsonResponse(getNotifications(false));
     if (mode === 'unread') return jsonResponse(getNotifications(true));
-    if (mode === 'metrics') return jsonResponse(getCurrentMetrics());
+    if (mode === 'metrics') return jsonResponse(getCurrentMetrics()); 
     if (mode === 'settings') return jsonResponse(getUserSettings());
 
-    // NEW: Handle insight requests for chat delivery
     if (mode === 'insights') {
       const sinceParam = e.parameter.since;
       const sinceDate = sinceParam ? new Date(sinceParam) : null;
@@ -96,176 +33,116 @@ function doGet(e) {
       return jsonResponse(insights);
     }
 
-    // Default: return expenses
+    // Default: return all expenses
     return jsonResponse(getExpenses());
   } catch (err) {
+    Logger.log('doGet Error: ' + err.message);
     return jsonResponse({ success: false, message: err.message || String(err) });
   }
 }
 
-
-/**
- * handleExpenseAction(action, data)
- * - add / update / delete rows in Form Responses 1
- */
-function handleExpenseAction(action, data) {
-  const sheet = getSheet(SHEETS.EXPENSES);
-  if (!sheet) return { success: false, message: 'Expenses sheet not found' };
-
-  if (action === 'add') {
-    const id = data.id || Date.now().toString();
-    const row = [
-      new Date(), // Timestamp
-      data.date || '', // Date (yyyy-mm-dd)
-      data.category || '',
-      data.subCategory || '',
-      data.item || '',
-      Number(data.amount) || 0,
-      data.email || '',
-      data.shopName || '',
-      data.paymentMode || '',
-      data.labels || '',
-      id
-    ];
-    sheet.appendRow(row);
-    return { success: true, id, message: 'Expense added' };
-  }
-
-  if (action === 'update') {
-    const finder = sheet.createTextFinder(String(data.id)).matchEntireCell(true).findNext();
-    if (!finder) return { success: false, message: 'ID not found' };
-    const rowIndex = finder.getRow();
-    const rowValues = [
-      new Date(),
-      data.date || '',
-      data.category || '',
-      data.subCategory || '',
-      data.item || '',
-      Number(data.amount) || 0,
-      data.email || '',
-      data.shopName || '',
-      data.paymentMode || '',
-      data.labels || '',
-      data.id
-    ];
-    sheet.getRange(rowIndex, 1, 1, 11).setValues([rowValues]);
-    return { success: true, message: 'Expense updated' };
-  }
-
-  if (action === 'delete') {
-    const finder = sheet.createTextFinder(String(data.id)).matchEntireCell(true).findNext();
-    if (!finder) return { success: false, message: 'ID not found' };
-    sheet.deleteRow(finder.getRow());
-    return { success: true, message: 'Expense deleted' };
-  }
-
-  return { success: false, message: 'Invalid action' };
-}
-
-/**
- * Triggers
- */
-function setupTriggers() {
-  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-
-  ScriptApp.newTrigger('calculateAllMetrics').timeBased().everyHours(4).create();
-  ScriptApp.newTrigger('calculateAllMetrics').timeBased().everyDays(1).create();
-
-  Logger.log('Triggers setup complete');
-}
-
-/**
- * oneTimeSetup
- */
-function oneTimeSetup() {
-  ensureSheetsExistAndHeaders();
-  const settings = getUserSettings();
-  initializeMetrics(settings);
-  calculateAllMetrics();
-  Logger.log('One time setup complete');
-}
-
-function testNotification() {
-  const testExpense = {
-    action: 'add',
-    id: Date.now().toString(),
-    date: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
-    category: 'Food',
-    amount: 1500,
-    email: 'test@example.com',
-    item: 'Test Expense',
-    shopName: 'Test Vendor',
-    paymentMode: 'Credit Card',
-    labels: 'Impulse'
-  };
-  handleExpenseAction('add', testExpense);
-  Utilities.sleep(1000);
-  calculateInstantMetrics();
-  const notifs = getNotifications(false);
-  Logger.log('Notifications: ' + JSON.stringify(notifs));
-}
-
-/**
- * ✅ FIXED: jsonResponse - return valid JSON (no addHeader)
- */
-function jsonResponse(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-/**
- * ✅ Simplified OPTIONS handler (CORS preflight)
- */
-function doOptions(e) {
-  return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.TEXT);
-}
-
-function debugOneTimeSetup() {
+// ==========================================================
+// 2. POST REQUEST HANDLER (doPost)
+// ==========================================================
+function doPost(e) {
   try {
-    Logger.log('Starting...');
-    ensureSheetsExistAndHeaders();
-    const settings = getUserSettings();
-    initializeMetrics(settings);
-    calculateAllMetrics();
-    Logger.log('Setup complete');
-  } catch (e) {
-    Logger.log('Error in debugOneTimeSetup: ' + e + '\nStack:\n' + e.stack);
+    const data = JSON.parse(e.postData.contents || '{}');
+
+    // ✅ CHATBOT: Route to chatbot.gs
+    if (data.functionCall) {
+      // NOTE: handleToolCall is defined in chatbot.gs
+      const result = handleToolCall(data.functionCall); 
+      return jsonResponse(result);
+    }
+
+    const action = data.action || 'add';
+
+    // ✅ EXPENSE CRUD
+    if (['add', 'update', 'delete'].includes(action)) {
+      const result = handleExpenseAction(action, data);
+
+      if (result.success) {
+        Utilities.sleep(1000); 
+        calculateInstantMetrics(); 
+      }
+
+      return jsonResponse(result);
+    }
+
+    // ✅ SETTINGS & ADMIN ACTIONS
+    if (action === 'updateSettings') return jsonResponse(updateUserSettings(data.settings || {}));
+    if (action === 'calculateMetrics') return jsonResponse(calculateAllMetrics());
+    if (action === 'getNotifications') return jsonResponse(getNotifications(data.unreadOnly));
+    if (action === 'markNotificationRead') return jsonResponse(markNotificationRead(data.id));
+    if (action === 'markNotificationDismissed') return jsonResponse(markNotificationDismissed(data.id));
+    
+    if (action === 'markInsightDelivered') {
+      return jsonResponse(markInsightDelivered(data.id)); 
+    }
+    
+    return jsonResponse({ success: false, message: `Unknown action: ${action}` });
+
+  } catch (error) {
+    Logger.log('doPost Error: ' + error.message);
+    return jsonResponse({ success: false, message: error.message });
   }
 }
 
+// ==========================================================
+// 3. HELPER FUNCTIONS
+// ==========================================================
+
 /**
- * getExpenses - Read all valid expense entries from the sheet.
- * Columns expected:
- * Timestamp | Date | Category | Sub Category | Item | Amount | Email Address | Shop/Site/Person name | Mode of payment | Labels | ID
+ * getExpenses - Fetches and structures all expense data from the sheet.
  */
 function getExpenses() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.EXPENSES);
+  const sheet = getSheet(SHEETS.EXPENSES);
   if (!sheet) return [];
 
-  const data = sheet.getDataRange().getValues();
-  if (!data || data.length <= 1) return [];
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (values.length <= 1) return [];
 
-  const headers = data.shift(); // Remove header row
+  const headers = values[0].map(h => String(h).trim());
+  const rows = values.slice(1);
   const expenses = [];
 
-  data.forEach((row, index) => {
-    // Skip empty rows or placeholder entries
-    if (!row[1] && !row[4] && !row[5]) return;
+  const getColumnIndex = (columnName) => {
+    const variations = {
+      'item': ['Item', 'item', 'ITEM'],
+      'amount': ['Amount', 'amount', 'AMOUNT'],
+      'category': ['Category', 'category', 'CATEGORY'],
+      'subCategory': ['Sub Category', 'SubCategory', 'subcategory', 'sub_category'],
+      'email': ['Email Address', 'Email', 'email'],
+      'shopName': ['Shop/Site/Person name', 'Shop', 'shop', 'shopName'],
+      'paymentMode': ['Mode of payment', 'Payment Mode', 'paymentMode'],
+      'labels': ['Labels', 'labels', 'LABELS'],
+      'id': ['ID', 'Id', 'id'],
+      'date': ['Date', 'date', 'DATE'],
+      'timestamp': ['Timestamp', 'timestamp', 'TIMESTAMP']
+    };
+    
+    for (const variant of variations[columnName] || []) {
+      const idx = headers.indexOf(variant);
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
 
+  rows.forEach((row, index) => {
     try {
       const expense = {
-        id: row[10] || `sheet-${index + 1}`,
-        timestamp: row[0] ? new Date(row[0]).toISOString() : '',
-        date: normalizeDate(row[1]),
-        category: row[2] || '',
-        subCategory: row[3] || '',
-        item: row[4] || '',
-        amount: parseFloat(row[5]) || 0,
-        email: row[6] || '',
-        shopName: row[7] || '',
-        paymentMode: row[8] || '',
-        labels: parseLabels(row[9]),
+        id: row[getColumnIndex('id')] || `sheet-${index + 1}`,
+        timestamp: row[getColumnIndex('timestamp')] ? new Date(row[getColumnIndex('timestamp')]).toISOString() : '',
+        date: normalizeDate(row[getColumnIndex('date')]),
+        category: row[getColumnIndex('category')] || '',
+        subCategory: row[getColumnIndex('subCategory')] || '',
+        item: row[getColumnIndex('item')] || '',
+        amount: parseFloat(row[getColumnIndex('amount')]) || 0,
+        email: row[getColumnIndex('email')] || '',
+        shopName: row[getColumnIndex('shopName')] || '',
+        paymentMode: row[getColumnIndex('paymentMode')] || '',
+        labels: parseLabels(row[getColumnIndex('labels')]),
       };
       expenses.push(expense);
     } catch (err) {
@@ -307,22 +184,20 @@ function parseLabels(value) {
   return String(value)
     .split(',')
     .map(l => l.trim())
-    .filter(Boolean);
+    .filter(l => l.length > 0);
 }
 
+/**
+ * jsonResponse - Utility to format responses.
+ */
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
 
-function setupInsightTrigger() {
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'dailyInsightGeneration') {
-      ScriptApp.deleteTrigger(t);
-    }
-  });
-
-  ScriptApp.newTrigger('dailyInsightGeneration')
-    .timeBased()
-    .everyDays(1)
-    .atHour(9)
-    .create();
-
-  Logger.log('Daily insight trigger created');
+/**
+ * getSheet - Utility to get a sheet by name.
+ */
+function getSheet(sheetName) {
+  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
 }

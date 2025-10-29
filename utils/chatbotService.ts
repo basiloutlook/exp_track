@@ -45,6 +45,7 @@ export interface FunctionResponse {
 const tools = [
   {
     functionDeclarations: [
+      // YOUR EXISTING 4 TOOLS - KEEP THESE AS IS
       {
         name: 'get_spending_trend',
         description: "Get the user's total spending trend for a period, compared to the previous period.",
@@ -82,7 +83,7 @@ const tools = [
         description: "Checks if any spending categories this month are significantly higher than their 3-month average.",
         parameters: {
           type: 'OBJECT',
-          properties: {}, // No parameters needed, it always runs for 'this_month'
+          properties: {},
           required: [],
         },
       },
@@ -95,6 +96,104 @@ const tools = [
             period: {
               type: 'STRING',
               description: "The period to check, e.g., 'this_month'. Defaults to 'this_month'.",
+            },
+          },
+          required: [],
+        },
+      },
+      
+      // ============================================
+      // ADD THESE 4 NEW TOOLS BELOW
+      // ============================================
+      
+      {
+        name: 'filter_expenses',
+        description: 'Filter expenses with multiple criteria including period, categories, amount range, payment method, and labels. Returns detailed expense list.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            period: {
+              type: 'STRING',
+              description: "Time period: 'today', 'this_week', 'last_week', 'this_month', 'last_month', 'last_30_days', 'last_3_months', 'last_6_months', 'this_year'",
+            },
+            categories: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: 'Array of category names to filter by',
+            },
+            minAmount: {
+              type: 'NUMBER',
+              description: 'Minimum transaction amount',
+            },
+            maxAmount: {
+              type: 'NUMBER',
+              description: 'Maximum transaction amount',
+            },
+            paymentMethod: {
+              type: 'STRING',
+              description: 'Filter by payment method',
+            },
+            label: {
+              type: 'STRING',
+              description: "Filter by label (e.g., 'impulse')",
+            },
+            sortBy: {
+              type: 'STRING',
+              description: "Sort by 'date' or 'amount'",
+            },
+            sortOrder: {
+              type: 'STRING',
+              description: "Sort order: 'asc' or 'desc'",
+            },
+            limit: {
+              type: 'NUMBER',
+              description: 'Maximum number of results to return',
+            },
+          },
+          required: [],
+        },
+      },
+      
+      {
+        name: 'compare_time_periods',
+        description: 'Compare spending across multiple time periods with category breakdowns. Great for week-to-week or month-to-month comparisons.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            periods: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: "Array of periods to compare, e.g., ['this_week', 'last_week'] or ['this_month', 'last_month', 'last_3_months']",
+            },
+          },
+          required: ['periods'],
+        },
+      },
+      
+      {
+        name: 'analyze_spending_patterns',
+        description: 'Analyze spending patterns including day-of-week spending, outlier transactions (unusually high amounts), and recurring expenses.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            period: {
+              type: 'STRING',
+              description: "Time period to analyze. Defaults to 'last_30_days'",
+            },
+          },
+          required: [],
+        },
+      },
+      
+      {
+        name: 'get_expense_statistics',
+        description: 'Get comprehensive statistics including total, average, median, min, max, payment method breakdown, and unique counts.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            period: {
+              type: 'STRING',
+              description: "Time period for statistics. Defaults to 'this_month'",
             },
           },
           required: [],
@@ -117,7 +216,31 @@ export async function getChatbotResponse(
 ): Promise<{ newHistory: Content[]; responseText: string }> {
   
   const systemPrompt: Part = {
-    text: "You are an expert financial advisor. Analyze the user's spending data from their Google Sheet by using the provided tools. Be conversational, precise, and provide actionable insights. Always use the tools to get data before answering. If a query is vague (e.g., 'am I doing good?'), ask for clarification or use a tool (like 'get_spending_trend') to provide a data-backed starting point."
+    text: `You are an intelligent personal finance assistant analyzing user spending data from their Google Sheet.
+
+  You have access to 8 powerful tools:
+
+  BASIC TOOLS:
+  1. get_spending_trend - Compare current period vs previous period spending
+  2. get_top_categories - Get top spending categories for a period
+  3. get_category_vs_average - Compare current month to 3-month average by category
+  4. get_impulse_purchases - Analyze impulse purchase spending
+
+  ADVANCED TOOLS:
+  5. filter_expenses - Filter expenses by multiple criteria (period, categories, amount range, payment method, labels)
+  6. compare_time_periods - Compare multiple time periods side-by-side
+  7. analyze_spending_patterns - Find patterns: day-of-week spending, outliers, recurring expenses
+  8. get_expense_statistics - Get comprehensive statistics (avg, median, min, max, breakdowns)
+
+  Guidelines:
+  - Use multiple tools when needed for thorough analysis
+  - Provide specific numbers, percentages, and actionable insights
+  - Identify unusual patterns or concerning trends
+  - Be conversational but data-driven
+  - For vague queries, use relevant tools to provide data-backed starting points
+  - Today's date: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+
+  Always use tools to get actual data before answering spending questions.`
   };
 
   // 1. Add the user's new message to the history
