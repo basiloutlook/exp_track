@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Send, Bot, User, TrendingUp, Sparkles, AlertCircle, CheckCircle, Info } from 'lucide-react-native';
 import { getChatbotResponse, Content } from '@/utils/chatbotService';
