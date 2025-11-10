@@ -18,7 +18,7 @@ import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 import { Expense } from '@/types/expense';
 import { chatHistoryService, ChatMessage } from '@/utils/chatHistoryService';
 import { useFocusEffect } from '@react-navigation/native';
-import { generatePassiveInsights, checkDataSpecificPatterns } from '@/utils/passiveInsightsService';
+import { generatePassiveInsights, checkDataSpecificPatterns, generateAndInjectInsights  } from '@/utils/passiveInsightsService';
 import { 
   initializeUserContext,
   buildConversationContext,
@@ -88,16 +88,6 @@ export default function Chatbot() {
       }
     }, [isLoadingHistory, messages.length])
   );
-  const clearAllData = async () => {
-  try {
-    await AsyncStorage.clear();
-    console.log('✅ All data cleared');
-    alert('All data cleared! Restart the app.');
-  } catch (error) {
-    console.error('Error clearing data:', error);
-  }
-};
-
   const loadInitialData = async () => {
     console.log('📥 Loading initial data...');
     setIsLoadingHistory(true);
@@ -463,9 +453,7 @@ export default function Chatbot() {
             </TouchableOpacity>
           ))}
         </ScrollView>
-<TouchableOpacity onPress={clearAllData}>
-  <Text>Clear All Data</Text>
-</TouchableOpacity>
+
         {/* Messages */}
         <ScrollView
           ref={scrollViewRef}

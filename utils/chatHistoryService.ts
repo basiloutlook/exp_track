@@ -261,3 +261,14 @@ class ChatHistoryService {
 }
 
 export const chatHistoryService = new ChatHistoryService();
+
+// Check if a similar insight already exists in chat history
+export async function hasInsight(key: string): Promise<boolean> {
+  const allMessages = await chatHistoryService.getChatHistory();
+  return allMessages.some(
+    (msg) => msg.type === "insight" && msg.insightData?.serverId === key
+  );
+}
+
+// Attach helper to service object (if using a shared instance)
+(chatHistoryService as any).hasInsight = hasInsight;

@@ -1,15 +1,28 @@
 // utils/chatbotService.ts
+import Constants from "expo-constants";
 
-// These are your Gemini API credentials
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY!;
-const GEMINI_API_URL = process.env.EXPO_PUBLIC_GEMINI_API_URL!; 
+// ✅ Load environment variables safely
+const { 
+  EXPO_PUBLIC_GEMINI_API_URL, 
+  EXPO_PUBLIC_GAS_WEB_APP_URL, 
+  GEMINI_API_KEY 
+} = Constants.expoConfig?.extra ?? {};
 
-// This is the NEW Web App URL from your deployed Google Apps Script
-const GAS_WEB_APP_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!;
+// ✅ Fallback for local dev (if running in Expo Go)
+const GEMINI_API_URL =
+  EXPO_PUBLIC_GEMINI_API_URL || process.env.EXPO_PUBLIC_GEMINI_API_URL;
+const GAS_WEB_APP_URL =
+  EXPO_PUBLIC_GAS_WEB_APP_URL || process.env.EXPO_PUBLIC_GAS_WEB_APP_URL;
+const API_KEY = GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
 console.log("🔑 GEMINI_API_URL:", GEMINI_API_URL);
-console.log("🔐 GEMINI_API_KEY:", GEMINI_API_KEY ? "Loaded ✅" : "❌ Missing");
+console.log("🔐 GEMINI_API_KEY:", API_KEY ? "Loaded ✅" : "❌ Missing");
 console.log("📈 GAS_WEB_APP_URL:", GAS_WEB_APP_URL ? "Loaded ✅" : "❌ Missing");
+
+// ----------------------------------------------------
+// Export them for use elsewhere in the chatbot service
+export { GEMINI_API_URL, GAS_WEB_APP_URL, API_KEY };
+
 
 // Define the conversation history types
 // (These match the Gemini API structure)

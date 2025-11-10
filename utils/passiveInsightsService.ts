@@ -2,9 +2,8 @@
 // No push notifications - just smart insights in chat when user opens app
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getExpensesFromGoogleSheet } from './googleSheets';
 import { getUserPreferences } from '@/utils/conversationContextService';
-import { chatHistoryService, ChatMessage } from '@/utils/chatHistoryService';
+import { ChatMessage } from '@/utils/chatHistoryService';
 
 const STORAGE_KEY = '@expense_tracker:last_insight_check';
 
@@ -295,4 +294,128 @@ export async function checkDataSpecificPatterns(expenses: any[]): Promise<ChatMe
   }
   
   return insights;
+}
+
+// ===================== AUTO INSIGHT GENERATOR =====================
+
+import { chatHistoryService } from "./chatHistoryService";
+import { getExpensesFromGoogleSheet } from "./googleSheets";
+import { Expense } from "@/types/expense";
+
+// Utility: Create a unique identifier for each insight
+const generateInsightKey = (category: string, metric: string, period: string) => {
+  return `${category}_${metric}_${period}`.toLowerCase();
+};
+
+// Utility: Group expenses by category
+function groupExpensesByCategory(expenses: Expense[]) {
+  return expenses.reduce((acc: Record<string, Expense[]>, exp) => {
+    const cat = exp.category || "Uncategorized";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(exp);
+    return acc;
+  }, {});
+}
+
+// Utility: Calculate total spending for last 7 days
+function getSpendingLastWeek(data: Expense[]): number {
+  const now = new Date();
+  const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  return data
+    .filter((d) => new Date(d.date) >= lastWeek)
+    .reduce((sum, e) => sum + e.amount, 0);
+}
+
+// MAIN FUNCTION: Generate actionable insights & inject into chat
+export async function generateAndInjectInsights() {
+  try {
+    const expenses = await getExpensesFromGoogleSheet();
+    if (!expenses || expenses.length === 0) return;
+
+    const grouped = groupExpensesByCategory(expenses);
+    const insights: any[] = [];
+
+    for (const [category, data] of Object.entries(grouped)) {
+      const total = data.reduce((sum, e) => sum + e.amount, 0);
+      const avg = total / data.length;
+      const lastWeek = getSpendingLastWeek(data);
+
+      // Insight #1: Spending increase
+      if (lastWeek > avg * 1.3) {
+        insights.push({
+          text: `Your spending in ${category} rose by ${Math.round(((lastWeek - avg) / avg) * 100)}% this week.`,
+          type: "insight",
+          insightData: {
+            title: "Spending Surge",
+            category,
+            metric: "increase",
+            period: "weekly",
+            severity: "medium",
+            action: "recommend_budget_adjustment",
+          },
+        });
+      }
+
+      // Insight #2: Consistent overspending
+      if (avg > 0 && lastWeek > avg * 1.5) {
+        insights.push({
+          text: `You’ve been overspending in ${category}. Try setting a spending limit for next week.`,
+          type: "insight",
+          insightData: {
+            title: "Overspending Pattern",
+            category,
+            metric: "habitual_overspend",
+            period: "weekly",
+            severity: "high",
+            action: "suggest_budget_cap",
+          },
+        });
+      }
+
+      // Insight #3: Positive trend
+      if (lastWeek < avg * 0.8 && avg > 0) {
+        insights.push({
+          text: `Nice! Your ${category} expenses dropped by ${Math.round(((avg - lastWeek) / avg) * 100)}%. Keep it up!`,
+          type: "insight",
+          insightData: {
+            title: "Positive Spending Trend",
+            category,
+            metric: "decrease",
+            period: "weekly",
+            severity: "positive",
+            action: "reinforce_saving_behavior",
+          },
+        });
+      }
+    }
+
+    // Save only new insights (avoid duplicates)
+    for (const insight of insights) {
+      const key = generateInsightKey(
+        insight.insightData.category,
+        insight.insightData.metric,
+        insight.insightData.period
+      );
+
+      // Some implementations of chatHistoryService may not expose hasInsight.
+      // Safely call it if present, otherwise treat as "not existing" to save the insight.
+      const hasInsightFn = (chatHistoryService as any).hasInsight;
+      const alreadyExists = typeof hasInsightFn === 'function'
+        ? await hasInsightFn.call(chatHistoryService, key)
+        : false;
+
+      if (!alreadyExists) {
+        await chatHistoryService.saveMessage({
+          ...insight,
+          insightData: { ...insight.insightData, key },
+          timestamp: new Date(),
+        });
+        console.log(`💡 New insight saved: ${insight.insightData.title}`);
+      } else {
+        console.log(`⏩ Skipped duplicate insight: ${insight.insightData.title}`);
+      }
+    }
+  } catch (err) {
+    console.error("❌ Error in generateAndInjectInsights:", err);
+  }
 }
