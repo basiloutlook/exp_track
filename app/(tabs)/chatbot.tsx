@@ -14,7 +14,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Send, Bot, User, TrendingUp, Sparkles, AlertCircle, CheckCircle, Info } from 'lucide-react-native';
-import { getChatbotResponse, Content } from '@/utils/chatbotService';
+import { getChatbotResponse, Content, loadEnvConfig, getEnvVars } from '@/utils/chatbotService';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 import { Expense } from '@/types/expense';
 import { chatHistoryService, ChatMessage } from '@/utils/chatHistoryService';
@@ -73,9 +73,13 @@ export default function Chatbot() {
 
   // Load expenses and chat history on mount
   useEffect(() => {
-    console.log('🤖 Chatbot mounted - loading initial data');
-    loadInitialData();
+    console.log("🤖 Chatbot mounted - preparing environment...");
+    loadEnvConfig(); // ✅ ensures env vars are ready
+    setTimeout(() => {
+      loadInitialData(); // small delay gives constants time to resolve
+    }, 300);
   }, []);
+
 
   // Refresh when screen comes into focus (optimized)
   useFocusEffect(

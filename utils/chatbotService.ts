@@ -1,27 +1,37 @@
 // utils/chatbotService.ts
 import Constants from "expo-constants";
 
-// ✅ Load environment variables safely
-const { 
-  EXPO_PUBLIC_GEMINI_API_URL, 
-  EXPO_PUBLIC_GAS_WEB_APP_URL, 
-  GEMINI_API_KEY 
-} = Constants.expoConfig?.extra ?? {};
+let configLoaded = false;
+let GEMINI_API_URL = "";
+let GAS_WEB_APP_URL = "";
+let GEMINI_API_KEY = "";
 
-// ✅ Fallback for local dev (if running in Expo Go)
-const GEMINI_API_URL =
-  EXPO_PUBLIC_GEMINI_API_URL || process.env.EXPO_PUBLIC_GEMINI_API_URL;
-const GAS_WEB_APP_URL =
-  EXPO_PUBLIC_GAS_WEB_APP_URL || process.env.EXPO_PUBLIC_GAS_WEB_APP_URL;
-const API_KEY = GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+export const loadEnvConfig = () => {
+  if (configLoaded) return;
 
-console.log("🔑 GEMINI_API_URL:", GEMINI_API_URL);
-console.log("🔐 GEMINI_API_KEY:", API_KEY ? "Loaded ✅" : "❌ Missing");
-console.log("📈 GAS_WEB_APP_URL:", GAS_WEB_APP_URL ? "Loaded ✅" : "❌ Missing");
+  const extra = Constants.expoConfig?.extra ?? {};
 
-// ----------------------------------------------------
-// Export them for use elsewhere in the chatbot service
-export { GEMINI_API_URL, GAS_WEB_APP_URL, API_KEY };
+  GEMINI_API_URL =
+    extra.EXPO_PUBLIC_GEMINI_API_URL || process.env.EXPO_PUBLIC_GEMINI_API_URL || "";
+  GAS_WEB_APP_URL =
+    extra.EXPO_PUBLIC_GAS_WEB_APP_URL || process.env.EXPO_PUBLIC_GAS_WEB_APP_URL || "";
+  GEMINI_API_KEY =
+    extra.GEMINI_API_KEY || process.env.GEMINI_API_KEY || "";
+
+  if (!GEMINI_API_URL || !GAS_WEB_APP_URL || !GEMINI_API_KEY) {
+    console.warn("⚠️ Env variables not ready yet. Chatbot may need retry.");
+  } else {
+    console.log("✅ Env config loaded for chatbot");
+    configLoaded = true;
+  }
+};
+
+export const getEnvVars = () => ({
+  GEMINI_API_URL,
+  GAS_WEB_APP_URL,
+  GEMINI_API_KEY,
+});
+
 
 
 // Define the conversation history types
