@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Send, Bot, User, TrendingUp, Sparkles, AlertCircle, CheckCircle, Info } from 'lucide-react-native';
 import { getChatbotResponse, Content, loadEnvConfig, getEnvVars } from '@/utils/chatbotService';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
+import { getDataLoadStatus } from "@/utils/googleSheets";
 import { Expense } from '@/types/expense';
 import { chatHistoryService, ChatMessage } from '@/utils/chatHistoryService';
 import { useFocusEffect } from '@react-navigation/native';
@@ -64,6 +65,7 @@ export default function Chatbot() {
   const [isLoading, setIsLoading] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [dataReady, setDataReady] = useState(getDataLoadStatus());
   const [apiHistory, setApiHistory] = useState<Content[]>([]);
   const [userContext, setUserContext] = useState<string>('');
   const [showFeedbackFor, setShowFeedbackFor] = useState<string | null>(null);
@@ -79,6 +81,16 @@ export default function Chatbot() {
       loadInitialData(); // small delay gives constants time to resolve
     }, 300);
   }, []);
+
+  useEffect(() => {
+  const checkData = setInterval(() => {
+    if (getDataLoadStatus()) {
+      clearInterval(checkData);
+      setDataReady(true);
+    }
+  }, 300);
+  return () => clearInterval(checkData);
+}, []);
 
 
   // Refresh when screen comes into focus (optimized)
@@ -116,7 +128,11 @@ export default function Chatbot() {
       console.log('✅ User context loaded');
       
       // Load expenses
-      console.log('💰 Loading expenses...');
+      if (!getDataLoadStatus()) {
+        console.log("🕐 Waiting for Google Sheet data...");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
       const expenseData = await getExpensesFromGoogleSheet();
       setExpenses(expenseData);
       console.log(`✅ Loaded ${expenseData.length} expenses`);
@@ -434,7 +450,7 @@ export default function Chatbot() {
       </SafeAreaView>
     );
   }
-
+  if (!dataReady) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <KeyboardAvoidingView
@@ -518,6 +534,7 @@ export default function Chatbot() {
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
 }
 
 const styles = StyleSheet.create({

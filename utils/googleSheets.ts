@@ -2,6 +2,10 @@
 import { Expense } from "@/types/expense";
 import { storageService } from "./storage";
 
+let dataLoaded = false;
+
+export const getDataLoadStatus = () => dataLoaded;
+
 const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!;
 console.log("🔗 Google Sheet URL:", GOOGLE_SHEET_URL);
 
@@ -27,44 +31,33 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
   try {
     // Check if we should use cached data
     const shouldRefresh = await storageService.shouldRefreshCache();
-    
     if (!shouldRefresh) {
       const cached = await storageService.getCachedExpensesWithTimestamp();
       if (cached && cached.expenses.length > 0) {
         console.log("📦 Using cached data (fresh)");
+        dataLoaded = true; // ✅ cached data is valid
         return cached.expenses;
       }
     }
 
     // Fetch fresh data from Google Sheets
     console.log("🌐 Fetching fresh data from Google Sheets");
-    const response = await fetch(GOOGLE_SHEET_URL, {
-      method: 'GET',
-      headers: {
-        'Cache-Control': 'no-cache',
-      },
-    });
+    const response = await fetch(process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-  const raw = await response.json();
-  const data = Array.isArray(raw)
-    ? raw
-    : Array.isArray(raw.expenses)
-    ? raw.expenses
-    : Array.isArray(raw.data)
-    ? raw.data
-    : [];
+    const data = await response.json();
 
-  if (!Array.isArray(data) || data.length === 0) {
-    console.warn("⚠️ No valid expenses found in Google Sheets response", raw);
-    const cached = await storageService.getCachedExpensesWithTimestamp();
-    return cached?.expenses || [];
-  }
+    if (!Array.isArray(data) || data.length === 0) {
+      console.warn("⚠️ No valid expenses found in Google Sheets response", data);
+      const cached = await storageService.getCachedExpensesWithTimestamp();
+      dataLoaded = !!cached?.expenses?.length;
+      return cached?.expenses || [];
+    }
 
-
+    // Map Google Sheet rows to Expense objects
     const expenses = data.map((row: any, index: number) => {
       const expense: Expense = {
         id: row.id || row.ID || row.Id || `sheet-${index + 1}`,
@@ -92,6 +85,7 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
       return expense;
     });
 
+    dataLoaded = true; // ✅ mark as ready globally
     console.log("🧾 Sample expense:", expenses[0]);
 
     // Cache the fresh data
@@ -100,20 +94,23 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
 
     return expenses;
   } catch (error) {
+    dataLoaded = false; // ❌ mark failure
     console.error("❌ Error fetching Google Sheet data:", error);
-    
+
     // Fallback to cached data if available
     const cached = await storageService.getCachedExpensesWithTimestamp();
     if (cached && cached.expenses.length > 0) {
       console.log("📦 Using cached data (fallback due to error)");
+      dataLoaded = true;
       return cached.expenses;
     }
-    
+
     // If no cache available, return empty array
     console.warn("⚠️ No cached data available, returning empty array");
     return [];
   }
 }
+
 
 /**
  * Force refresh expenses from Google Sheet, bypassing cache.

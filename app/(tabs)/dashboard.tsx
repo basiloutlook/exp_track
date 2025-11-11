@@ -10,7 +10,7 @@ import {
   Pressable,
   RefreshControl,
 } from 'react-native';
-import { deleteExpenseFromGoogleSheet } from '@/utils/googleSheets';
+import { deleteExpenseFromGoogleSheet,  getDataLoadStatus, getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 import { useAlerts } from "@/hooks/useAlerts";
 import { useNotifications } from "@/hooks/useNotifications";
 import NotificationBell from "@/components/NotificationBell";
@@ -21,7 +21,6 @@ import { storageService } from '@/utils/storage';
 import { Expense } from '@/types/expense';
 import { Filter, Trash2, TrendingUp, Calendar, X, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Pencil } from 'lucide-react-native';
 import StatCard from '@/components/StatCard';
-import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 const DateTimePickerModal = require('react-native-modal-datetime-picker').default;
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -861,36 +860,43 @@ export default function Dashboard() {
   const router = useRouter();
 
   const loadExpenses = useCallback(async (forceRefresh = false) => {
-    setIsLoading(true);
     try {
-      // Only invalidate cache if explicitly requested
-      if (forceRefresh) {
-        await storageService.invalidateCache();
+      console.log("📥 Loading expenses...");
+
+      // Step 1: Try cached data first
+      const cached = await storageService.getCachedExpensesWithTimestamp();
+      if (cached && cached.expenses.length > 0 && !forceRefresh) {
+        console.log("📦 Using cached expenses for dashboard");
+        setExpenses(cached.expenses);
       }
-      
-      // Try local storage first (fast)
-      const localExpenses = await storageService.getExpenses();
-      
-      if (localExpenses && localExpenses.length > 0 && !forceRefresh) {
-        setExpenses(localExpenses.sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        ));
-        setIsLoading(false);
+
+      // Step 2: Fetch fresh data if cache is stale or forceRefresh
+      const sheetExpenses = await getExpensesFromGoogleSheet();
+
+      // Step 3: Only update if we got something
+      if (sheetExpenses && sheetExpenses.length > 0) {
+        console.log(`✅ Loaded ${sheetExpenses.length} expenses from Sheets`);
+        setExpenses(sheetExpenses);
+      } else if (cached && cached.expenses.length > 0) {
+        console.log("📦 Falling back to cached expenses");
+        setExpenses(cached.expenses);
+      }
+
+      // Step 4: Confirm data readiness globally
+      if (getDataLoadStatus()) {
+        console.log("🟢 Data ready for chatbot and dashboard");
       } else {
-        // No local data or force refresh - fetch from sheets
-        const sheetExpenses = await getExpensesFromGoogleSheet();
-        const data = sheetExpenses || [];
-        setExpenses(data.sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        ));
+        console.warn("🕐 Data still loading...");
       }
     } catch (error) {
-      console.error("loadExpenses error:", error);
-      Alert.alert('Error', 'Failed to load expenses');
-    } finally {
-      setIsLoading(false);
+      console.error("❌ Error loading expenses in dashboard:", error);
     }
   }, []);
+
+  useEffect(() => {
+    console.log("📲 Dashboard mounted — initializing data flow...");
+  }, []);
+
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -901,12 +907,21 @@ export default function Dashboard() {
   
   useFocusEffect(
     useCallback(() => {
-      // Only load if expenses are empty
+      console.log("🏁 Dashboard focused - checking data state...");
+
       if (expenses.length === 0) {
+        console.log("📊 No expenses in memory - loading data...");
         loadExpenses(false);
+      } else {
+        console.log("📦 Expenses already loaded in memory");
       }
-    }, [expenses.length])
+
+      return () => {
+        console.log("👋 Dashboard unfocused");
+      };
+    }, [expenses.length, loadExpenses])
   );
+
   
   useEffect(() => {
   // Refresh notifications when screen loads or expenses change
