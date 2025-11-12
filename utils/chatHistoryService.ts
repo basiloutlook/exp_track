@@ -12,6 +12,8 @@ export interface InsightData {
   serverId?: string; // ID from Google Sheets
 }
 
+
+
 export interface ChatMessage {
   id: string;
   text: string;
@@ -76,7 +78,15 @@ class ChatHistoryService {
       console.error('Error saving messages:', error);
     }
   }
-
+async clearAllMessages(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(CHAT_HISTORY_KEY);
+    console.log('✅ All chat messages cleared from storage');
+  } catch (error) {
+    console.error('Error clearing messages:', error);
+    throw error;
+  }
+}
   /**
    * Fetch new insights from server and add to chat history
    * Returns number of new insights added

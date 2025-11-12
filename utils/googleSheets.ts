@@ -6,6 +6,7 @@ import { requestQueue } from './requestQueue';
 const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!;
 console.log("🔗 Google Sheet URL:", GOOGLE_SHEET_URL);
 
+let dataLoaded = false;
 /**
  * Normalize Google Sheet date fields to prevent 1-day shift.
  * Ensures date is treated as a plain local date (not UTC midnight).
@@ -324,6 +325,12 @@ export async function getInsightsFromServer(since: Date | null = null): Promise<
       headers: { 'Cache-Control': 'no-cache' },
     });
 
+    // Handle rate limiting gracefully
+    if (response.status === 429) {
+      console.log('⏳ Rate limit reached, will retry later');
+      return [];
+    }
+
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     
     const data = await response.json();
@@ -345,7 +352,10 @@ export async function getInsightsFromServer(since: Date | null = null): Promise<
     console.log(`✅ Fetched ${validInsights.length} valid insights from server`);
     return validInsights;
   } catch (error) {
-    console.error('❌ Error fetching insights:', error);
+    // Only log non-rate-limit errors as errors
+    if (error instanceof Error && !error.message.includes('429')) {
+      console.error('❌ Error fetching insights:', error);
+    }
     return [];
   }
 }

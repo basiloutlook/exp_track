@@ -10,10 +10,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Send, Bot, User, TrendingUp, Sparkles, AlertCircle, CheckCircle, Info } from 'lucide-react-native';
+import { Send, Bot, User, TrendingUp, Sparkles, AlertCircle, CheckCircle, Info, Trash2 } from 'lucide-react-native';
 import { getChatbotResponse, Content } from '@/utils/chatbotService';
 import { getExpensesFromGoogleSheet } from '@/utils/googleSheets';
 import { Expense } from '@/types/expense';
@@ -79,23 +80,53 @@ export default function Chatbot() {
 
   // Refresh when screen comes into focus (optimized)
   useFocusEffect(
-    useCallback(() => {
-      console.log('🤖 Chatbot focused');
-      if (!isLoadingHistory && messages.length === 0) {
-        loadInitialData(); // First time only
-      } else if (!isLoadingHistory) {
-        syncNewInsights(); // Just check for new insights
-      }
-    }, [isLoadingHistory, messages.length])
+  useCallback(() => {
+    console.log('🤖 Chatbot focused');
+    if (!isLoadingHistory && messages.length === 0) {
+      loadInitialData(); // First time only
+    }
+    // Remove syncNewInsights here - it's already called in loadInitialData
+  }, [isLoadingHistory, messages.length])
+);
+
+  const clearChatHistory = async () => {
+  Alert.alert(
+    'Clear Chat History',
+    'Are you sure you want to delete all chat messages? This cannot be undone.',
+    [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await chatHistoryService.clearAllMessages();
+            setMessages([]);
+            setApiHistory([]);
+            setOffset(0);
+            setHasMore(true);
+            console.log('✅ Chat history cleared');
+            
+            // Show welcome message again
+            const welcomeMessage: ChatMessage = {
+              id: Date.now().toString(),
+              text: "Chat history cleared. How can I help you today?",
+              type: 'bot',
+              timestamp: new Date(),
+            };
+            await chatHistoryService.saveMessage(welcomeMessage);
+            setMessages([welcomeMessage]);
+          } catch (error) {
+            console.error('Error clearing chat history:', error);
+            Alert.alert('Error', 'Failed to clear chat history');
+          }
+        },
+      },
+    ]
   );
-  const clearAllData = async () => {
-  try {
-    await AsyncStorage.clear();
-    console.log('✅ All data cleared');
-    alert('All data cleared! Restart the app.');
-  } catch (error) {
-    console.error('Error clearing data:', error);
-  }
 };
 
   const loadInitialData = async () => {
@@ -435,10 +466,12 @@ const renderMessage = (message: ChatMessage) => {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.header}>
-          <Bot size={24} color="#10b981" />
-          <Text style={styles.title}>Expense Assistant</Text>
-          <TrendingUp size={24} color="#6b7280" />
-        </View>
+  <Bot size={24} color="#10b981" />
+  <Text style={styles.title}>Expense Assistant</Text>
+  <TouchableOpacity onPress={clearChatHistory}>
+    <Trash2 size={22} color="#ef4444" />
+  </TouchableOpacity>
+</View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#10b981" />
           <Text style={styles.loadingText}>Loading chat history...</Text>
@@ -479,9 +512,6 @@ const renderMessage = (message: ChatMessage) => {
             </TouchableOpacity>
           ))}
         </ScrollView>
-<TouchableOpacity onPress={clearAllData}>
-  <Text>Clear All Data</Text>
-</TouchableOpacity>
         {/* Messages */}
         <ScrollView
           ref={scrollViewRef}
