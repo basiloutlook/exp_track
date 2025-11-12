@@ -1,0 +1,54 @@
+export default ({ config }) => ({
+  ...config,
+
+  name: "Expense Tracker",
+  slug: "expense-tracker",
+  version: "1.0.0",
+  orientation: "portrait",
+  icon: "./assets/images/icon.png",
+  scheme: "myapp",
+  userInterfaceStyle: "automatic",
+  newArchEnabled: true,
+
+  ios: {
+    supportsTablet: true,
+    bundleIdentifier: "com.basil.expensetracker",
+  },
+
+  android: {
+    package: "com.basil.expensetracker",
+    versionCode: 1,
+    adaptiveIcon: {
+      foregroundImage: "./assets/images/adaptive-icon.png",
+      backgroundColor: "#FFFFFF",
+    },
+    permissions: [],
+    softwareKeyboardLayoutMode: "pan",
+  },
+
+  web: {
+    bundler: "metro",
+    output: "single",
+    favicon: "./assets/images/favicon.png",
+  },
+
+  plugins: [
+    "expo-router",
+    "expo-font",
+    "expo-web-browser",
+  ],
+
+  experiments: {
+    typedRoutes: true,
+  },
+
+  extra: {
+    EXPO_PUBLIC_GAS_WEB_APP_URL: process.env.EXPO_PUBLIC_GAS_WEB_APP_URL,
+    EXPO_PUBLIC_GEMINI_API_URL: process.env.EXPO_PUBLIC_GEMINI_API_URL,
+    EXPO_PUBLIC_GEMINI_API_KEY: process.env.EXPO_PUBLIC_GEMINI_API_KEY,
+    router: {},
+    eas: {
+      projectId: "88e2979e-a02e-4128-b59b-e98b85573d58",
+    },
+  },
+});

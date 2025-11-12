@@ -1,7 +1,8 @@
 // utils/googleSheets.ts
 import { Expense } from "@/types/expense";
 import { storageService } from "./storage";
-
+// 🔹 ADD THIS after the imports
+import { requestQueue } from './requestQueue';
 const GOOGLE_SHEET_URL = process.env.EXPO_PUBLIC_GAS_WEB_APP_URL!;
 console.log("🔗 Google Sheet URL:", GOOGLE_SHEET_URL);
 
@@ -24,6 +25,7 @@ function normalizeRowDate(raw: any): string {
  * Falls back to cache if network request fails.
  */
 export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
+  return requestQueue.enqueue(async () => {
   try {
     // Check if we should use cached data
     const shouldRefresh = await storageService.shouldRefreshCache();
@@ -113,7 +115,9 @@ export async function getExpensesFromGoogleSheet(): Promise<Expense[]> {
     console.warn("⚠️ No cached data available, returning empty array");
     return [];
   }
+}, 'low'); // Background fetch = low priority
 }
+
 
 /**
  * Force refresh expenses from Google Sheet, bypassing cache.
@@ -184,6 +188,7 @@ export async function forceRefreshExpenses(): Promise<Expense[]> {
 export async function addExpenseToGoogleSheet(
   expense: Expense
 ): Promise<void> {
+  return requestQueue.enqueue(async () => {
   try {
     const payload = {
       action: "add",
@@ -221,6 +226,7 @@ export async function addExpenseToGoogleSheet(
     console.error("❌ Error adding to Google Sheet:", error);
     throw error;
   }
+}, 'high'); // User action = high priority
 }
 
 /**

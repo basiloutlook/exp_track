@@ -1,5 +1,5 @@
 // app/(tabs)/chatbot.tsx
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -326,95 +326,111 @@ export default function Chatbot() {
     await chatHistoryService.saveMessage(feedbackMessage);
   };
 
-  const renderMessage = (message: ChatMessage) => {
-    if (message.type === 'user') {
-      return (
-        <View key={message.id} style={[styles.messageContainer, styles.userMessage]}>
+  // 🔹 Location: Right BEFORE your existing renderMessage function
+
+const MessageItem = React.memo(({ 
+  message, 
+  showFeedback, 
+  onFeedback 
+}: { 
+  message: ChatMessage;
+  showFeedback: boolean;
+  onFeedback: (messageId: string, helpful: boolean) => void;
+}) => {
+  if (message.type === 'user') {
+    return (
+      <View style={[styles.messageContainer, styles.userMessage]}>
+        <View style={styles.messageHeader}>
+          <User size={16} color="#ffffff" />
+          <Text style={[styles.messageTime, { color: '#e0e7ff' }]}>
+            {message.timestamp
+              ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              : ""}
+          </Text>
+        </View>
+        <Text style={[styles.messageText, { color: '#ffffff' }]}>{message.text}</Text>
+      </View>
+    );
+  }
+
+  if (message.type === 'bot') {
+    return (
+      <View>
+        <View style={[styles.messageContainer, styles.botMessage]}>
           <View style={styles.messageHeader}>
-            <User size={16} color="#ffffff" />
-            <Text style={[styles.messageTime, { color: '#e0e7ff' }]}>
+            <Bot size={16} color="#10b981" />
+            <Text style={styles.messageTime}>
               {message.timestamp
                 ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                 : ""}
             </Text>
           </View>
-          <Text style={[styles.messageText, { color: '#ffffff' }]}>{message.text}</Text>
+          <Text style={styles.messageText}>{message.text}</Text>
         </View>
-      );
-    }
-
-    if (message.type === 'bot') {
-      return (
-        <View key={message.id}>
-          <View style={[styles.messageContainer, styles.botMessage]}>
-            <View style={styles.messageHeader}>
-              <Bot size={16} color="#10b981" />
-              <Text style={styles.messageTime}>
-                {message.timestamp
-                  ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                  : ""}
-              </Text>
+        
+        {showFeedback && ( 
+          <View style={styles.feedbackContainer}>
+            <Text style={styles.feedbackPrompt}>Was this helpful?</Text>
+            <View style={styles.feedbackButtons}>
+              <TouchableOpacity
+                style={[styles.feedbackButton, styles.feedbackYes]}
+                onPress={() => onFeedback(message.id, true)}
+              >
+                <Text style={styles.feedbackButtonText}>👍 Yes</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.feedbackButton, styles.feedbackNo]}
+                onPress={() => onFeedback(message.id, false)} 
+              >
+                <Text style={styles.feedbackButtonText}>👎 No</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.messageText}>{message.text}</Text>
           </View>
-          
-          {/* FEEDBACK BUTTONS */}
-          {showFeedbackFor === message.id && (
-            <View style={styles.feedbackContainer}>
-              <Text style={styles.feedbackPrompt}>Was this helpful?</Text>
-              <View style={styles.feedbackButtons}>
-                <TouchableOpacity
-                  style={[styles.feedbackButton, styles.feedbackYes]}
-                  onPress={() => handleFeedback(message.id, true)}
-                >
-                  <Text style={styles.feedbackButtonText}>👍 Yes</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.feedbackButton, styles.feedbackNo]}
-                  onPress={() => handleFeedback(message.id, false)}
-                >
-                  <Text style={styles.feedbackButtonText}>👎 No</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
-      );
-    }
+        )}
+      </View>
+    );
+  }
 
-    // Auto-generated insight
-    if (message.type === 'insight' && message.insightData) {
-      const { insightType, severity, title } = message.insightData;
-      
-      // Safety check: Use default severity if invalid
-      const validSeverity = severity && SEVERITY_COLORS[severity] 
-        ? severity 
-        : 'low';
-      
-      const severityStyle = SEVERITY_COLORS[validSeverity];
-      const IconComponent = INSIGHT_ICONS[insightType || 'default'];
+  if (message.type === 'insight' && message.insightData) {
+    const { insightType, severity, title } = message.insightData;
+    const validSeverity = severity && SEVERITY_COLORS[severity] ? severity : 'low';
+    const severityStyle = SEVERITY_COLORS[validSeverity];
+    const IconComponent = INSIGHT_ICONS[insightType || 'default'];
 
-      return (
-        <View key={message.id} style={styles.insightContainer}>
-          <View style={[styles.insightBadge, { backgroundColor: severityStyle.bg, borderColor: severityStyle.border }]}>
-            <View style={styles.insightHeader}>
-              <IconComponent size={18} color={severityStyle.icon} />
-              <Text style={[styles.insightTitle, { color: severityStyle.text }]}>{title || 'Insight'}</Text>
-            </View>
-            <Text style={[styles.insightText, { color: severityStyle.text }]}>{message.text}</Text>
-            <Text style={[styles.insightTime, { color: severityStyle.text }]}>
-              {message.timestamp
-                ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                : ""}
-            </Text>
+    return (
+      <View style={styles.insightContainer}>
+        <View style={[styles.insightBadge, { backgroundColor: severityStyle.bg, borderColor: severityStyle.border }]}>
+          <View style={styles.insightHeader}>
+            <IconComponent size={18} color={severityStyle.icon} />
+            <Text style={[styles.insightTitle, { color: severityStyle.text }]}>{title || 'Insight'}</Text>
           </View>
+          <Text style={[styles.insightText, { color: severityStyle.text }]}>{message.text}</Text>
+          <Text style={[styles.insightTime, { color: severityStyle.text }]}>
+            {message.timestamp
+              ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              : ""}
+          </Text>
         </View>
-      );
-    }
+      </View>
+    );
+  }
 
-    return null;
-  };
+  return null;
+}, (prevProps, nextProps) => {
+  return prevProps.message.id === nextProps.message.id &&
+         prevProps.showFeedback === nextProps.showFeedback;
+});
 
+const renderMessage = (message: ChatMessage) => {
+  return (
+    <MessageItem 
+      key={message.id} 
+      message={message}
+      showFeedback={showFeedbackFor === message.id}
+      onFeedback={handleFeedback}
+    />
+  );
+};
   if (isLoadingHistory) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>

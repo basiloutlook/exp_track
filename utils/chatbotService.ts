@@ -1,11 +1,10 @@
 // utils/chatbotService.ts
 import Constants from "expo-constants";
 
-// ✅ Load environment variables safely
 const { 
   EXPO_PUBLIC_GEMINI_API_URL, 
   EXPO_PUBLIC_GAS_WEB_APP_URL, 
-  GEMINI_API_KEY 
+  EXPO_PUBLIC_GEMINI_API_KEY  // ✅ Changed from EXPO_PUBLIC_GEMINI_API_KEY
 } = Constants.expoConfig?.extra ?? {};
 
 // ✅ Fallback for local dev (if running in Expo Go)
@@ -13,7 +12,7 @@ const GEMINI_API_URL =
   EXPO_PUBLIC_GEMINI_API_URL || process.env.EXPO_PUBLIC_GEMINI_API_URL;
 const GAS_WEB_APP_URL =
   EXPO_PUBLIC_GAS_WEB_APP_URL || process.env.EXPO_PUBLIC_GAS_WEB_APP_URL;
-const API_KEY = GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+const API_KEY = EXPO_PUBLIC_GEMINI_API_KEY || process.env.EXPO_PUBLIC_GEMINI_API_KEY;  // ✅ Now matches
 
 console.log("🔑 GEMINI_API_URL:", GEMINI_API_URL);
 console.log("🔐 GEMINI_API_KEY:", API_KEY ? "Loaded ✅" : "❌ Missing");
@@ -374,30 +373,40 @@ Remember: You're a financial coach, not just a calculator. Help users understand
     { role: 'user', parts: [{ text: userQuery }] },
   ];
 
-  try {
-    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+   try {
+    const requestBody = {
+      contents: [
+        ...(chatHistory.length === 0 ? [
+          { role: 'user', parts: [systemPrompt] }, 
+          { role: 'model', parts: [{ text: "Understood. I'm ready to help you analyze your expenses and make better financial decisions. What would you like to know?"}] }
+        ] : []),
+        ...historyWithUserQuery
+      ],
+      tools: tools,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2000,
+      },
+    };
+
+    console.log('📤 Sending request to Gemini API');
+    console.log('🔑 Using API key:', API_KEY ? `${API_KEY.substring(0, 10)}...` : 'MISSING');
+    console.log('📋 Contents count:', requestBody.contents.length);
+
+    const response = await fetch(`${GEMINI_API_URL}?key=${API_KEY}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        contents: [
-          ...(chatHistory.length === 0 ? [
-            { role: 'user' as const, parts: [systemPrompt] }, 
-            { role: 'model' as const, parts: [{ text: "Understood. I'm ready to help you analyze your expenses and make better financial decisions. What would you like to know?"}] }
-          ] : []),
-          ...historyWithUserQuery
-        ],
-        tools: tools,
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2000,
-        },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
+    console.log('📥 Response status:', response.status);
+
     if (!response.ok) {
-      throw new Error(`Gemini API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error('❌ API Error:', errorText);
+      throw new Error(`Gemini API error: ${response.status} - ${errorText.substring(0, 200)}`);
     }
 
     const data = await response.json();
@@ -418,34 +427,42 @@ Remember: You're a financial coach, not just a calculator. Help users understand
 
       const toolResult = await callGoogleAppsScript(functionCall);
 
-      const finalResponse = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+      const secondRequestBody = {
+        contents: [
+          ...(chatHistory.length === 0 ? [
+            { role: 'user', parts: [systemPrompt] }, 
+            { role: 'model', parts: [{ text: "Understood. I'm ready to help you analyze your expenses and make better financial decisions. What would you like to know?"}] }
+          ] : []),
+          ...historyWithFunctionCall,
+          {
+            role: 'function',
+            parts: [{
+              functionResponse: {
+                name: functionCall.name,
+                response: toolResult,
+              }
+            }]
+          }
+        ],
+        tools: tools,
+      };
+
+      console.log('📤 Sending second request with tool results');
+
+      const finalResponse = await fetch(`${GEMINI_API_URL}?key=${API_KEY}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          contents: [
-            ...(chatHistory.length === 0 ? [
-              { role: 'user' as const, parts: [systemPrompt] }, 
-              { role: 'model' as const, parts: [{ text: "Understood. I'm ready to help you analyze your expenses and make better financial decisions. What would you like to know?"}] }
-            ] : []),
-            ...historyWithFunctionCall,
-            {
-              role: 'function',
-              parts: [{
-                functionResponse: {
-                  name: functionCall.name,
-                  response: toolResult,
-                }
-              }]
-            }
-          ],
-          tools: tools,
-        }),
+        body: JSON.stringify(secondRequestBody),
       });
 
+      console.log('📥 Second response status:', finalResponse.status);
+
       if (!finalResponse.ok) {
-        throw new Error(`Gemini API error (step 2): ${finalResponse.status}`);
+        const errorText = await finalResponse.text();
+        console.error('❌ Second API Error:', errorText);
+        throw new Error(`Gemini API error (step 2): ${finalResponse.status} - ${errorText.substring(0, 200)}`);
       }
 
       const finalData = await finalResponse.json();

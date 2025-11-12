@@ -16,7 +16,10 @@ const STORAGE_KEYS = {
 };
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
+// 🔹 ADD THESE LINES HERE (after constants, before saveData function)
+let inMemoryCache: Expense[] | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 async function saveData<T>(key: string, data: T): Promise<void> {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(data));
@@ -45,19 +48,44 @@ export const storageService = {
     await saveData(STORAGE_KEYS.USER, { email });
   },
 
-  async getExpenses(): Promise<Expense[]> {
-    try {
-      const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES);
-      return Array.isArray(expenses) ? expenses : [];
-    } catch (error) {
-      console.error("❌ Error loading expenses:", error);
-      return [];
-    }
-  },
+  // 🔹 REPLACE THIS METHOD COMPLETELY
+ async getExpenses(): Promise<Expense[]> {
+  // Check if in-memory cache is valid
+  if (inMemoryCache && (Date.now() - cacheTimestamp < CACHE_TTL)) {
+    console.log('📦 Using in-memory cache');
+    return [...inMemoryCache]; // Return copy to prevent mutations
+  }
 
-  async setExpenses(expenses: Expense[]): Promise<void> {
-    await saveData(STORAGE_KEYS.EXPENSES, expenses);
-  },
+  // Try AsyncStorage cache first
+  const cached = await this.getCachedExpensesWithTimestamp();
+  if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+    console.log('💾 Using AsyncStorage cache');
+    inMemoryCache = cached.expenses;
+    cacheTimestamp = Date.now();
+    return cached.expenses;
+  }
+
+  // Fallback to direct load (for backward compatibility)
+  const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES) || [];
+  
+  // Update both caches
+  inMemoryCache = expenses;
+  cacheTimestamp = Date.now();
+  await this.setCachedExpenses(expenses);
+  
+  return expenses;
+},
+
+  // 🔹 FIND: async setExpenses(expenses: Expense[]): Promise<void> {
+// REPLACE with:
+
+async setExpenses(expenses: Expense[]): Promise<void> {
+  await saveData(STORAGE_KEYS.EXPENSES, expenses);
+  // Update cache when expenses are set
+  inMemoryCache = expenses;
+  cacheTimestamp = Date.now();
+  await this.setCachedExpenses(expenses);
+},
 
   // NEW: Cache management methods
   async getCachedExpensesWithTimestamp(): Promise<{ expenses: Expense[], timestamp: number } | null> {
@@ -107,42 +135,55 @@ export const storageService = {
   },
 
   async invalidateCache(): Promise<void> {
-    try {
-      await AsyncStorage.removeItem(STORAGE_KEYS.EXPENSES_CACHE);
-      console.log("🗑️ Cache invalidated");
-    } catch (error) {
-      console.error("❌ Error invalidating cache:", error);
-    }
-  },
-
+  try {
+    inMemoryCache = null;
+    cacheTimestamp = 0;
+    await AsyncStorage.removeItem(STORAGE_KEYS.EXPENSES_CACHE);
+    console.log("🗑️ Cache invalidated");
+  } catch (error) {
+    console.error("❌ Error invalidating cache:", error);
+  }
+},
   // NEW: Add expense locally only (no Google Sheet sync)
   async addExpenseOnly(expense: Expense): Promise<void> {
-    try {
-      const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
-      expenses.push(expense);
-      await saveData(STORAGE_KEYS.EXPENSES, expenses);
-      console.log("✅ Expense added locally");
-    } catch (error) {
-      console.error("❌ Error adding expense locally:", error);
-    }
-  },
+  // Optimistic update - update cache immediately
+  if (inMemoryCache) {
+    inMemoryCache.push(expense);
+  }
+
+  const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES) || [];
+  expenses.push(expense);
+  await saveData(STORAGE_KEYS.EXPENSES, expenses);
+  
+  // Refresh cache
+  inMemoryCache = expenses;
+  cacheTimestamp = Date.now();
+  await this.setCachedExpenses(expenses);
+},
 
   // NEW: Update expense locally only (no Google Sheet sync)
-  async updateExpenseOnly(updated: Expense): Promise<void> {
-    try {
-      const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
-      const idx = expenses.findIndex((e) => e.id === updated.id);
-      if (idx >= 0) {
-        expenses[idx] = updated;
-      } else {
-        expenses.push(updated);
-      }
-      await saveData(STORAGE_KEYS.EXPENSES, expenses);
-      console.log("✅ Updated expense locally");
-    } catch (error) {
-      console.error("❌ Error updating expense locally:", error);
+  // 🔹 FIND: async updateExpenseOnly(expense: Expense): Promise<void> {
+// REPLACE with:
+
+async updateExpenseOnly(expense: Expense): Promise<void> {
+  // Optimistic update
+  if (inMemoryCache) {
+    const index = inMemoryCache.findIndex(e => e.id === expense.id);
+    if (index !== -1) {
+      inMemoryCache[index] = expense;
     }
-  },
+  }
+
+  const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES) || [];
+  const index = expenses.findIndex(e => e.id === expense.id);
+  if (index !== -1) {
+    expenses[index] = expense;
+    await saveData(STORAGE_KEYS.EXPENSES, expenses);
+    inMemoryCache = expenses;
+    cacheTimestamp = Date.now();
+    await this.setCachedExpenses(expenses);
+  }
+},
 
   // DEPRECATED: This was causing duplicates. Use addExpenseOnly or updateExpenseOnly instead
   async saveExpense(expense: Expense): Promise<void> {
@@ -187,16 +228,30 @@ export const storageService = {
     }
   },
 
-  async deleteExpense(id: string): Promise<void> {
-    try {
-      const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
-      const filtered = expenses.filter((e) => e.id !== id);
-      await saveData(STORAGE_KEYS.EXPENSES, filtered);
-      console.log("🗑️ Expense deleted locally:", id);
-    } catch (error) {
-      console.error("❌ Error deleting expense locally:", error);
+  // 🔹 FIND: async deleteExpense(id: string): Promise<void> {
+// REPLACE with:
+
+async deleteExpense(id: string): Promise<void> {
+  try {
+    // Update in-memory cache
+    if (inMemoryCache) {
+      inMemoryCache = inMemoryCache.filter((e) => e.id !== id);
     }
-  },
+    
+    const expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
+    const filtered = expenses.filter((e) => e.id !== id);
+    await saveData(STORAGE_KEYS.EXPENSES, filtered);
+    
+    // Update cache
+    inMemoryCache = filtered;
+    cacheTimestamp = Date.now();
+    await this.setCachedExpenses(filtered);
+    
+    console.log("🗑️ Expense deleted locally:", id);
+  } catch (error) {
+    console.error("❌ Error deleting expense locally:", error);
+  }
+},
 
   async exportToCSV(): Promise<string | null> {
     try {

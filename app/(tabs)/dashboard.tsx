@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -440,53 +440,7 @@ sidebarSafeArea: {
   },
 });
 
-const ExpenseList = ({ expenses, onEdit, onDelete }: { expenses: Expense[], onEdit: (expense: Expense) => void, onDelete: (id: string) => void }) => {
-    return (
-        <View>
-            {expenses.map((expense) => {
-                const expenseDate = new Date(expense.date);
-                const formattedDate = expenseDate.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                });
 
-                const detailsToShow = [];
-                const categoryString = expense.category || 'Uncategorized';
-                const subCategoryString = expense.subCategory ? ` (${expense.subCategory})` : '';
-                const fullCategoryDisplay = `${categoryString}${subCategoryString}`;
-                
-                detailsToShow.push(fullCategoryDisplay);
-                if (expense.shopName) {
-                    detailsToShow.push(expense.shopName);
-                }
-                detailsToShow.push(formattedDate);
-
-                return (
-                    <View key={expense.id} style={styles.expenseItemContainer}>
-                        <View style={styles.expenseItemLeft}>
-                            <Text style={styles.expenseItemDescription}>{expense.item}</Text>
-                            {detailsToShow.map((detail, index) => (
-                                <Text key={index} style={styles.expenseItemMeta}>{detail}</Text>
-                            ))}
-                        </View>
-                        <View style={styles.expenseItemRight}>
-                             <Text style={styles.expenseItemAmount}>{`₹${Number(expense.amount).toFixed(2)}`}</Text>
-                             <View style={styles.expenseItemActions}>
-                                <TouchableOpacity onPress={() => onEdit(expense)} style={styles.actionButton}>
-                                    <Pencil size={18} color="#6b7280" />
-                                </TouchableOpacity>
-                                <TouchableOpacity onPress={() => onDelete(expense.id)} style={styles.actionButton}>
-                                    <Trash2 size={18} color="#ef4444" />
-                                </TouchableOpacity>
-                             </View>
-                        </View>
-                    </View>
-                );
-            })}
-        </View>
-    );
-};
 const getDefaultStartDate = () => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth() - 12, 1);
@@ -841,7 +795,57 @@ const ITEMS_PER_LOAD = 5;
 
 type SortBy = 'date' | 'amount';
 type SortOrder = 'asc' | 'desc';
+const ExpenseList = React.memo(({ expenses, onEdit, onDelete }: { expenses: Expense[], onEdit: (expense: Expense) => void, onDelete: (id: string) => void }) => {
+    return (
+        <View>
+            {expenses.map((expense) => {
+                const expenseDate = new Date(expense.date);
+                const formattedDate = expenseDate.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
 
+                const detailsToShow = [];
+                const categoryString = expense.category || 'Uncategorized';
+                const subCategoryString = expense.subCategory ? ` (${expense.subCategory})` : '';
+                const fullCategoryDisplay = `${categoryString}${subCategoryString}`;
+                
+                detailsToShow.push(fullCategoryDisplay);
+                if (expense.shopName) {
+                    detailsToShow.push(expense.shopName);
+                }
+                detailsToShow.push(formattedDate);
+
+                return (
+                    <View key={expense.id} style={styles.expenseItemContainer}>
+                        <View style={styles.expenseItemLeft}>
+                            <Text style={styles.expenseItemDescription}>{expense.item}</Text>
+                            {detailsToShow.map((detail, index) => (
+                                <Text key={index} style={styles.expenseItemMeta}>{detail}</Text>
+                            ))}
+                        </View>
+                        <View style={styles.expenseItemRight}>
+                             <Text style={styles.expenseItemAmount}>{`₹${Number(expense.amount).toFixed(2)}`}</Text>
+                             <View style={styles.expenseItemActions}>
+                                <TouchableOpacity onPress={() => onEdit(expense)} style={styles.actionButton}>
+                                    <Pencil size={18} color="#6b7280" />
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => onDelete(expense.id)} style={styles.actionButton}>
+                                    <Trash2 size={18} color="#ef4444" />
+                                </TouchableOpacity>
+                             </View>
+                        </View>
+                    </View>
+                );
+            })}
+        </View>
+    );
+    }, (prevProps, nextProps) => {
+    // Only re-render if expenses array actually changed
+    return prevProps.expenses.length === nextProps.expenses.length &&
+           prevProps.expenses[0]?.id === nextProps.expenses[0]?.id;
+});
 export default function Dashboard() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const { currentAlert, dismissCurrentAlert } = useAlerts(expenses);
