@@ -68,25 +68,32 @@ export default function Chatbot() {
   const [apiHistory, setApiHistory] = useState<Content[]>([]);
   const [userContext, setUserContext] = useState<string>('');
   const [showFeedbackFor, setShowFeedbackFor] = useState<string | null>(null);
-  
+  const [isInitialized, setIsInitialized] = useState(false);
+  const isInitializing = useRef(false);
   const PAGE_SIZE = 20;
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Load expenses and chat history on mount
   useEffect(() => {
+  if (!isInitialized && !isInitializing.current) {
+    isInitializing.current = true;
     console.log('🤖 Chatbot mounted - loading initial data');
-    loadInitialData();
-  }, []);
+    loadInitialData().finally(() => {
+      setIsInitialized(true);
+      isInitializing.current = false;
+    });
+  }
+}, [isInitialized]);
+
 
   // Refresh when screen comes into focus (optimized)
-  useFocusEffect(
+ useFocusEffect(
   useCallback(() => {
     console.log('🤖 Chatbot focused');
-    if (!isLoadingHistory && messages.length === 0) {
-      loadInitialData(); // First time only
+    // Only reload if already initialized
+    if (isInitialized && !isInitializing.current && messages.length === 0) {
+      loadInitialData();
     }
-    // Remove syncNewInsights here - it's already called in loadInitialData
-  }, [isLoadingHistory, messages.length])
+  }, [isInitialized, messages.length])
 );
 
   const clearChatHistory = async () => {
@@ -130,76 +137,115 @@ export default function Chatbot() {
 };
 
   const loadInitialData = async () => {
-    console.log('📥 Loading initial data...');
-    setIsLoadingHistory(true);
+  console.log('📥 Loading initial data...');
+  setIsLoadingHistory(true);
+  
+  try {
+    // Step 1: Initialize user context first (critical foundation)
+    console.log('🔧 Initializing user context...');
+    await initializeUserContext();
+    
+    // Step 2: Build context for Gemini
+    const context = await buildConversationContext();
+    setUserContext(context);
+    console.log('✅ User context loaded');
+    
+    // Step 3: Load expenses (wrapped in try-catch)
+    console.log('💰 Loading expenses...');
+    let expenseData: Expense[] = [];
     try {
-      // Initialize user context
-      console.log('🔧 Initializing user context...');
-      await initializeUserContext();
-      
-      // Build context for Gemini
-      const context = await buildConversationContext();
-      setUserContext(context);
-      console.log('✅ User context loaded');
-      
-      // Load expenses
-      console.log('💰 Loading expenses...');
-      const expenseData = await getExpensesFromGoogleSheet();
+      expenseData = await getExpensesFromGoogleSheet();
       setExpenses(expenseData);
       console.log(`✅ Loaded ${expenseData.length} expenses`);
+    } catch (error) {
+      console.error('⚠️ Error loading expenses, continuing with empty data:', error);
+    }
 
-      // Load chat history
-      console.log('💬 Loading chat history...');
-      const recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+    // Step 4: Load chat history FIRST before syncing anything
+    console.log('💬 Loading chat history...');
+    let recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+    
+    // Step 5: Only sync insights if we have existing history
+    if (recentMessages.length > 0) {
+      console.log('🔄 Syncing insights from server...');
+      try {
+        const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
+        if (newInsightsCount > 0) {
+          console.log(`✨ ${newInsightsCount} new insight(s) added`);
+          // Reload messages after syncing
+          recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+        }
+      } catch (error) {
+        console.error('⚠️ Error syncing insights, continuing:', error);
+      }
+    }
+    
+    // Step 6: Generate passive insights (only if we have expense data)
+    if (expenseData.length > 0) {
+      try {
+        await generatePassiveInsights();
+      } catch (error) {
+        console.error('⚠️ Error generating passive insights:', error);
+      }
+      
+      // Step 7: Check for data-specific patterns
+      try {
+        const dataInsights = await checkDataSpecificPatterns(expenseData);
+        for (const insight of dataInsights) {
+          await chatHistoryService.saveMessage(insight);
+        }
+        
+        // Reload messages after adding insights
+        if (dataInsights.length > 0) {
+          recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+        }
+      } catch (error) {
+        console.error('⚠️ Error checking data patterns:', error);
+      }
+    }
+    
+    // Step 8: Set messages or create welcome message
+    if (recentMessages.length === 0) {
+      const prefs = await getUserPreferences();
+      const tone = prefs.preferredTone === 'professional' ? 
+        "Hello! I'm your expense assistant." :
+        "Hi! I'm your expense assistant 👋";
+      
+      const welcomeMessage: ChatMessage = {
+        id: Date.now().toString(),
+        text: `${tone} I analyze your spending patterns and provide smart insights. I'll learn from our conversations to give you better advice. Ask me anything!`,
+        type: 'bot',
+        timestamp: new Date(),
+      };
+      
+      await chatHistoryService.saveMessage(welcomeMessage);
+      setMessages([welcomeMessage]);
+      console.log('👋 Welcome message created');
+    } else {
       setMessages(recentMessages);
       setOffset(PAGE_SIZE);
       console.log(`✅ Loaded ${recentMessages.length} messages`);
-
-      // Sync insights from server
-      const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
-      
-      // Generate passive insights (once per day)
-      await generatePassiveInsights();
-      
-      // Check for data-specific patterns
-      const dataInsights = await checkDataSpecificPatterns(expenseData);
-      for (const insight of dataInsights) {
-        await chatHistoryService.saveMessage(insight);
-      }
-      
-      const updatedHistory = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
-      
-      if (updatedHistory.length === 0) {
-        // Get user preferences for personalized welcome
-        const prefs = await getUserPreferences();
-        const tone = prefs.preferredTone === 'professional' ? 
-          "Hello! I'm your expense assistant." :
-          "Hi! I'm your expense assistant 👋";
-        
-        const welcomeMessage: ChatMessage = {
-          id: Date.now().toString(),
-          text: `${tone} I analyze your spending patterns and provide smart insights. I'll learn from our conversations to give you better advice. Ask me anything!`,
-          type: 'bot',
-          timestamp: new Date(),
-        };
-        await chatHistoryService.saveMessage(welcomeMessage);
-        setMessages([welcomeMessage]);
-        console.log('👋 Welcome message created');
-      } else {
-        setMessages(updatedHistory);
-        
-        if (newInsightsCount > 0) {
-          console.log(`✨ ${newInsightsCount} new insight(s) added to chat`);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error loading initial data:', error);
-    } finally {
-      setIsLoadingHistory(false);
-      console.log('✅ Initial data load complete');
-      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  };
+    
+  } catch (error) {
+    console.error('❌ Critical error loading initial data:', error);
+    
+    // Create emergency fallback message
+    const errorMessage: ChatMessage = {
+      id: Date.now().toString(),
+      text: "Hi! I'm your expense assistant. I had trouble loading some data, but I'm ready to help. What would you like to know?",
+      type: 'bot',
+      timestamp: new Date(),
+    };
+    
+    setMessages([errorMessage]);
+    
+  } finally {
+    setIsLoadingHistory(false);
+    console.log('✅ Initial data load complete');
+    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+  }
+};
 
   const loadOlderMessages = async () => {
     if (isLoadingHistory || !hasMore) return;

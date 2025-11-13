@@ -9,6 +9,7 @@ import {
   Modal,
   Pressable,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { deleteExpenseFromGoogleSheet } from '@/utils/googleSheets';
 import { useAlerts } from "@/hooks/useAlerts";
@@ -16,6 +17,7 @@ import { useNotifications } from "@/hooks/useNotifications";
 import NotificationBell from "@/components/NotificationBell";
 import AlertBanner from "@/components/AlertBanner";
 import { useFocusEffect } from '@react-navigation/native';
+import { dashboardCacheService, DashboardCache } from '@/utils/dashboardCacheService';
 import { useRouter } from 'expo-router';
 import { storageService } from '@/utils/storage';
 import { Expense } from '@/types/expense';
@@ -126,6 +128,12 @@ subCategoryOptionSelected: {
 subCategoryOptionText: {
     fontSize: 13,
     color: '#374151',
+},
+iconButtonDisabled: {
+  opacity: 0.5,
+},
+disabledOverlay: {
+  opacity: 0.6,
 },
   statsGrid: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   section: { backgroundColor: '#ffffff', borderRadius: 12, padding: 16, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
@@ -851,6 +859,9 @@ export default function Dashboard() {
   const { currentAlert, dismissCurrentAlert } = useAlerts(expenses);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [cachedData, setCachedData] = useState<DashboardCache | null>(null);
+  const [isUsingCache, setIsUsingCache] = useState(true);
+  const [isBackgroundLoading, setIsBackgroundLoading] = useState(false);
   const [filters, setFilters] = useState<any>({ ...defaultFilters });
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedCategoryForDrill, setSelectedCategoryForDrill] = useState<string | null>(null);
@@ -865,36 +876,58 @@ export default function Dashboard() {
   const router = useRouter();
 
   const loadExpenses = useCallback(async (forceRefresh = false) => {
-    setIsLoading(true);
-    try {
-      // Only invalidate cache if explicitly requested
-      if (forceRefresh) {
-        await storageService.invalidateCache();
+  setIsLoading(true);
+  
+  try {
+    // STAGE 1: Load cache immediately (instant UI)
+    if (!forceRefresh) {
+      const cache = await dashboardCacheService.getCache();
+      if (cache) {
+        setCachedData(cache);
+        setIsUsingCache(true);
+        setIsLoading(false); // ✅ UI shows immediately
+        console.log('📦 Showing cached dashboard (stage 1)');
       }
-      
-      // Try local storage first (fast)
-      const localExpenses = await storageService.getExpenses();
-      
-      if (localExpenses && localExpenses.length > 0 && !forceRefresh) {
-        setExpenses(localExpenses.sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        ));
-        setIsLoading(false);
-      } else {
-        // No local data or force refresh - fetch from sheets
-        const sheetExpenses = await getExpensesFromGoogleSheet();
-        const data = sheetExpenses || [];
-        setExpenses(data.sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        ));
-      }
-    } catch (error) {
-      console.error("loadExpenses error:", error);
-      Alert.alert('Error', 'Failed to load expenses');
-    } finally {
-      setIsLoading(false);
     }
-  }, []);
+    
+    // STAGE 2: Load full data in background
+    setIsBackgroundLoading(true);
+    
+    if (forceRefresh) {
+      await storageService.invalidateCache();
+      await dashboardCacheService.clearCache(); // Clear dashboard cache too
+    }
+    
+    const localExpenses = await storageService.getExpenses();
+    
+    if (localExpenses && localExpenses.length > 0 && !forceRefresh) {
+      setExpenses(localExpenses.sort((a, b) => 
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      ));
+      setIsUsingCache(false); // ✅ Switch to full data
+      console.log('✅ Full data loaded (stage 2)');
+      
+      // Update cache in background (don't await)
+      dashboardCacheService.computeAndCache(localExpenses);
+    } else {
+      const sheetExpenses = await getExpensesFromGoogleSheet();
+      const data = sheetExpenses || [];
+      setExpenses(data.sort((a, b) => 
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      ));
+      setIsUsingCache(false);
+      
+      // Cache for next time
+      dashboardCacheService.computeAndCache(data);
+    }
+  } catch (error) {
+    console.error("loadExpenses error:", error);
+    Alert.alert('Error', 'Failed to load expenses');
+  } finally {
+    setIsLoading(false);
+    setIsBackgroundLoading(false);
+  }
+}, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -932,16 +965,17 @@ useEffect(() => {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            try {
-              await deleteExpenseFromGoogleSheet(id);
-              await storageService.deleteExpense(id);
-              await loadExpenses(true); // Force refresh after delete
-              Alert.alert('Success', 'Expense deleted successfully!');
-            } catch (error) {
-              console.error('Error deleting expense:', error);
-              Alert.alert('Error', 'Failed to delete expense. Please try again.');
-            }
-          },
+          try {
+            await deleteExpenseFromGoogleSheet(id);
+            await storageService.deleteExpense(id);
+            await dashboardCacheService.clearCache(); // ✅ Clear cache
+            await loadExpenses(true); // Force refresh after delete
+            Alert.alert('Success', 'Expense deleted successfully!');
+          } catch (error) {
+            console.error('Error deleting expense:', error);
+            Alert.alert('Error', 'Failed to delete expense. Please try again.');
+          }
+        },
         },
       ]
     );
@@ -1122,28 +1156,60 @@ const {
       allExpensesForCharts: categoryDrillFiltered, // Quarterly/Past 3 Months/Moving Averages (includes category drill-downs, NO date drill-downs)
       currentMonthExpenses: currentMonth, // Current month with category drill-downs
       filteredExpensesForDisplay: dateFiltered, // Transaction list
-      filterOptions: {
+      filterOptions: (() => {
+  // Check for active filters
+  const hasActiveFilters = 
+    filters.category || 
+    filters.subCategory || 
+    filters.labels.length > 0 ||
+    filters.email ||
+    drillDownDateFilter ||
+    selectedCategoryForDrill ||
+    selectedSubCategoryForDrill;
+  
+  // Use cached filter options if available and no filters
+  if (isUsingCache && cachedData && !hasActiveFilters) {
+    console.log('📦 Using cached filter options');
+    // Build categoryMap from cached data
+    const categoryMap: { [key: string]: string[] } = {};
+    expenses.forEach(e => {
+      if (!categoryMap[e.category]) {
+        categoryMap[e.category] = [];
+      }
+      if (e.subCategory && !categoryMap[e.category].includes(e.subCategory)) {
+        categoryMap[e.category].push(e.subCategory);
+      }
+    });
+    
+    return {
+      ...cachedData.filterOptions,
+      categoryMap,
+    };
+  }
+  
+  // Otherwise compute from expenses
+  return {
     categories: Array.from(categories).sort(),
     subCategories: Array.from(subCategories).sort(),
     labels: Array.from(labels).sort(),
     emails: Array.from(emails).sort(),
     categoryMap: (() => {
-        const map: { [key: string]: string[] } = {};
-        expenses.forEach(e => {
-            if (!map[e.category]) {
-                map[e.category] = [];
-            }
-            if (e.subCategory && !map[e.category].includes(e.subCategory)) {
-                map[e.category].push(e.subCategory);
-            }
-        });
-        // Sort sub-categories for each category
-        Object.keys(map).forEach(cat => {
-            map[cat].sort();
-        });
-        return map;
+      const map: { [key: string]: string[] } = {};
+      expenses.forEach(e => {
+        if (!map[e.category]) {
+          map[e.category] = [];
+        }
+        if (e.subCategory && !map[e.category].includes(e.subCategory)) {
+          map[e.category].push(e.subCategory);
+        }
+      });
+      Object.keys(map).forEach(cat => {
+        map[cat].sort();
+      });
+      return map;
     })(),
-}
+  };
+})()
   };
 }, [expenses, filters, drillDownDateFilter, selectedCategoryForDrill, selectedSubCategoryForDrill]);
 
@@ -1154,13 +1220,63 @@ const {
   quarterlyData,
   past3MonthsData,
 } = useMemo(() => {
+  // Check if we have active filters or drill-downs
+  const hasActiveFilters = 
+    filters.category || 
+    filters.subCategory || 
+    filters.labels.length > 0 ||
+    filters.email ||
+    drillDownDateFilter ||
+    selectedCategoryForDrill ||
+    selectedSubCategoryForDrill;
+  
+  // If using cache AND no filters/drills, return cached data
+  if (isUsingCache && cachedData && !hasActiveFilters) {
+    console.log('📦 Using cached aggregates');
+    
+    // Convert cached quarterly data back to proper format
+    const quarterlyDataFromCache = cachedData.quarterlyTotals.map((q, index) => {
+      const prevValue = index > 0 ? cachedData.quarterlyTotals[index - 1].value : q.value;
+      return {
+        label: q.label,
+        value: q.value,
+        startDate: new Date(q.startDate),
+        endDate: new Date(q.endDate),
+        valueChange: q.value - prevValue,
+      };
+    });
+    
+    // Convert cached monthly data
+    const monthlyDataFromCache = cachedData.monthlyTotals.map((m, index) => {
+      const prevValue = index < cachedData.monthlyTotals.length - 1 
+        ? cachedData.monthlyTotals[index + 1].value 
+        : m.value;
+      return {
+        label: m.label,
+        value: m.value,
+        startDate: new Date(m.startDate),
+        endDate: new Date(m.endDate),
+        valueChange: m.value - prevValue,
+      };
+    });
+    
+    return {
+      totalExpense: cachedData.totalExpense,
+      currentMonthTotal: cachedData.currentMonthTotal,
+      quarterlyData: quarterlyDataFromCache,
+      past3MonthsData: monthlyDataFromCache,
+    };
+  }
+  
+  // Otherwise, compute from full data (for filtered views or after background load)
+  console.log('🔄 Computing from full expense data');
+  
   const now = new Date();
   const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
   // Quarterly data with comparisons
   const quarters = calculateQuarters(now);
 
-  // Calculate Q0 (the quarter immediately before Q1) for comparison
   const q0StartDate = new Date(quarters[0].startDate);
   q0StartDate.setMonth(q0StartDate.getMonth() - 3);
   const q0EndDate = new Date(quarters[0].startDate);
@@ -1181,13 +1297,10 @@ const {
       })
       .reduce((sum, e) => sum + e.amount, 0);
 
-    // Get previous quarter value for comparison
     let previousQuarterValue = 0;
     if (index === 0) {
-      // Q1 compares with Q0 (calculated above)
       previousQuarterValue = q0Value;
     } else {
-      // Q2, Q3, Q4 compare with the previous quarter in the array
       const prevQuarter = quarters[index - 1];
       previousQuarterValue = allExpensesForCharts
         .filter(e => {
@@ -1219,7 +1332,6 @@ const {
       .filter(e => monthKey(new Date(e.date)) === key)
       .reduce((s, e) => s + e.amount, 0);
 
-    // Compare with the month BEFORE this one
     const prevMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
     const previousMonthValue = allExpensesForCharts
       .filter(e => {
@@ -1235,7 +1347,6 @@ const {
       valueChange: value - previousMonthValue,
     };
   });
-  past3MonthsData; // Show newest to oldest (Sep, Aug, Jul)
 
   const totalExpense = filteredExpensesForDisplay.reduce((s, e) => s + e.amount, 0);
   const currentMonthTotal = currentMonthExpenses.reduce((s, e) => s + e.amount, 0);
@@ -1246,12 +1357,44 @@ const {
     quarterlyData,
     past3MonthsData,
   };
-}, [allExpensesForCharts, currentMonthExpenses, filteredExpensesForDisplay]);
+}, [isUsingCache, cachedData, allExpensesForCharts, currentMonthExpenses, filteredExpensesForDisplay, filters, drillDownDateFilter, selectedCategoryForDrill, selectedSubCategoryForDrill]);
 
 const movingAverages = useMemo(() => {
-  // Moving averages use allExpensesForCharts (includes category drill-downs, no date filters/drill-downs)
+  // Check for active filters
+  const hasActiveFilters = 
+    filters.category || 
+    filters.subCategory || 
+    filters.labels.length > 0 ||
+    filters.email ||
+    drillDownDateFilter ||
+    selectedCategoryForDrill ||
+    selectedSubCategoryForDrill;
+  
+  // Use cached moving averages if available and no filters
+  if (isUsingCache && cachedData && !hasActiveFilters) {
+    console.log('📦 Using cached moving averages');
+    return {
+      ma3: { 
+        maValue: cachedData.movingAverages.ma3, 
+        comparison: { percentageChange: 0, isIncrease: false, hasPriorData: false } 
+      },
+      ma6: { 
+        maValue: cachedData.movingAverages.ma6, 
+        comparison: { percentageChange: 0, isIncrease: false, hasPriorData: false } 
+      },
+      ma12: { 
+        maValue: cachedData.movingAverages.ma12, 
+        comparison: { percentageChange: 0, isIncrease: false, hasPriorData: false } 
+      },
+      ma36: { 
+        maValue: cachedData.movingAverages.ma36, 
+        comparison: { percentageChange: 0, isIncrease: false, hasPriorData: false } 
+      },
+    };
+  }
+  
+  // Otherwise compute from full data
   const expensesToAverage = allExpensesForCharts;
-
   const now = new Date();
   const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
@@ -1270,9 +1413,9 @@ const movingAverages = useMemo(() => {
       const maValue = currentPeriodTotal / months;
 
       const priorPeriodValues = Array.from({ length: months }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - months - (i + 1), 1);
-    return monthlyMap[monthKey(d)] || 0;
-});
+          const d = new Date(now.getFullYear(), now.getMonth() - months - (i + 1), 1);
+          return monthlyMap[monthKey(d)] || 0;
+      });
       const priorPeriodTotal = priorPeriodValues.reduce((s, v) => s + v, 0);
 
       let percentageChange = 0;
@@ -1305,14 +1448,34 @@ const movingAverages = useMemo(() => {
       ma12: calculateMAData(12),
       ma36: calculateMAData(36),
   };
-}, [allExpensesForCharts]);
+}, [isUsingCache, cachedData, allExpensesForCharts, filters, drillDownDateFilter, selectedCategoryForDrill, selectedSubCategoryForDrill]);
 
 const { categoryPieData, subCategoryPieData } = useMemo(() => {
-  const categoryTotals: { [k: string]: { value: number, name: string } } = {};
-  filteredExpensesForDisplay.forEach(e => {
-    if (!categoryTotals[e.category]) categoryTotals[e.category] = { value: 0, name: e.category };
-    categoryTotals[e.category].value += Number(e.amount) || 0;
-  });
+  // Check for active filters
+  const hasActiveFilters = 
+    filters.category || 
+    filters.subCategory || 
+    filters.labels.length > 0 ||
+    filters.email ||
+    drillDownDateFilter ||
+    selectedCategoryForDrill ||
+    selectedSubCategoryForDrill;
+  
+  // Use cached category data if available and no filters
+  let categoryTotals: { [k: string]: { value: number, name: string } } = {};
+  
+  if (isUsingCache && cachedData && !hasActiveFilters) {
+    console.log('📦 Using cached category breakdown');
+    Object.entries(cachedData.categoryTotals).forEach(([name, value]) => {
+      categoryTotals[name] = { value, name };
+    });
+  } else {
+    // Compute from filtered data
+    filteredExpensesForDisplay.forEach(e => {
+      if (!categoryTotals[e.category]) categoryTotals[e.category] = { value: 0, name: e.category };
+      categoryTotals[e.category].value += Number(e.amount) || 0;
+    });
+  }
 
   const subCategoryTotals: { [k: string]: { value: number, name: string } } = {};
   if (selectedCategoryForDrill) {
@@ -1324,11 +1487,12 @@ const { categoryPieData, subCategoryPieData } = useMemo(() => {
       }
     });
   }
+  
   return {
     categoryPieData: Object.values(categoryTotals),
     subCategoryPieData: Object.values(subCategoryTotals),
   };
-}, [filteredExpensesForDisplay, selectedCategoryForDrill]);
+}, [isUsingCache, cachedData, filteredExpensesForDisplay, selectedCategoryForDrill, filters, drillDownDateFilter, selectedSubCategoryForDrill]);
 
 const sortedTransactions = useMemo(() => {
   const sorted = [...filteredExpensesForDisplay];
@@ -1416,15 +1580,25 @@ return (
     <View style={styles.container}>
       {/* Fixed Header */}
 <View style={styles.header}>
-  <Text style={styles.title}>Dashboard</Text>
+  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+    <Text style={styles.title}>Dashboard</Text>
+    
+    {/* Show loading indicator when background loading */}
+    {isBackgroundLoading && (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <ActivityIndicator size="small" color="#2563eb" />
+        <Text style={{ fontSize: 11, color: '#6b7280' }}>Updating...</Text>
+      </View>
+    )}
+  </View>
 
   {/* Right-side icons */}
   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-    {/* Filter icon button */}
+    {/* Filter icon button - disable while using cache */}
     <TouchableOpacity
       onPress={() => setFilterOpen(true)}
-      disabled={expenses.length === 0}
-      style={styles.iconButton}
+      disabled={expenses.length === 0 || isUsingCache}
+      style={[styles.iconButton, isUsingCache && { opacity: 0.5 }]}
     >
       <Filter size={22} color="#2563eb" />
     </TouchableOpacity>
@@ -1433,6 +1607,24 @@ return (
     <NotificationBell size={24} />
   </View>
 </View>
+
+{isUsingCache && (
+  <View style={{
+    backgroundColor: '#eff6ff',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#bfdbfe',
+  }}>
+    <ActivityIndicator size="small" color="#2563eb" />
+    <Text style={{ fontSize: 12, color: '#1e40af' }}>
+      Loading full data... Filters will be available shortly.
+    </Text>
+  </View>
+)}
 
 {currentAlert && (
   <AlertBanner
@@ -1487,12 +1679,14 @@ return (
     <TouchableOpacity 
         onPress={handleCurrentMonthDrillDown}
         activeOpacity={0.7}
+        disabled={isUsingCache} // ✅ ADD THIS
+  style={isUsingCache && { opacity: 0.5 }} // ✅ ADD THIS
     >
         <StatCard 
             icon={<Calendar size={24} color="#10b981" />} 
             title="Current Month" 
             value={`₹${currentMonthTotal.toFixed(2)}`} 
-            subtitle="Tap to drill down"
+            subtitle={isUsingCache ? "Loading..." : "Tap to drill down"} // ✅ UPDATE THIS
         />
     </TouchableOpacity>
 </View>
@@ -1511,6 +1705,7 @@ return (
                               style={styles.expenseRow}
                               onPress={() => handleQuarterlyDrillDown(quarter)}
                               activeOpacity={0.7}
+                              disabled={isUsingCache} // ✅ ADD THIS
                             >
                             <Text style={styles.expenseLabel}>{quarter.label}</Text>
                             <View style={styles.expenseValueContainer}>
@@ -1547,6 +1742,7 @@ return (
                                 style={styles.expenseRow}
                                 onPress={() => handleMonthDrillDown(month)}
                                 activeOpacity={0.7}
+                                disabled={isUsingCache} // ✅ ADD THIS
                               >
                             <Text style={styles.expenseLabel}>{month.label}</Text>
                             <View style={styles.expenseValueContainer}>
@@ -1591,7 +1787,7 @@ return (
                         <PieChart
                             title="Category Breakdown"
                             data={categoryPieData}
-                            onSlicePress={handleCategoryDrillDown}
+                            onSlicePress={isUsingCache ? undefined : handleCategoryDrillDown} // ✅ CHANGE THIS
                             noContainerStyle={true}
                             showCount={categoryShowCount}
                             onShowMore={handleShowMoreCategories}
@@ -1616,66 +1812,83 @@ return (
                 </View>
 
                 <View style={styles.section}>
-                    <View style={styles.transactionHeader}>
-                        <Text style={styles.sectionTitle}>Recent Transactions</Text>
-                        <View style={styles.sortControls}>
-                            <TouchableOpacity 
-                                style={[styles.sortButton, sortBy === 'date' && styles.sortButtonActive]}
-                                onPress={() => {
-                                    if (sortBy === 'date') {
-                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                                    } else {
-                                        setSortBy('date');
-                                        setSortOrder('desc');
-                                    }
-                                }}
-                            >
-                                <Calendar size={14} color={sortBy === 'date' ? '#2563eb' : '#6b7280'} />
-                                <Text style={[styles.sortButtonText, sortBy === 'date' && styles.sortButtonTextActive]}>
-                                    Date {sortBy === 'date' && (sortOrder === 'asc' ? '(A-Z)' : '(Z-A)')}
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                style={[styles.sortButton, sortBy === 'amount' && styles.sortButtonActive]}
-                                onPress={() => {
-                                    if (sortBy === 'amount') {
-                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                                    } else {
-                                        setSortBy('amount');
-                                        setSortOrder('desc');
-                                    }
-                                }}
-                            >
-                                <TrendingUp size={14} color={sortBy === 'amount' ? '#2563eb' : '#6b7280'} />
-                                <Text style={[styles.sortButtonText, sortBy === 'amount' && styles.sortButtonTextActive]}>
-                                    Amount {sortBy === 'amount' && (sortOrder === 'asc' ? '(A-Z)' : '(Z-A)')}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                    <ExpenseList
-                        expenses={sortedTransactions.slice(0, transactionShowCount)}
-                        onDelete={handleDeleteExpense}
-                        onEdit={handleEditExpense}
-                    />
+  {isUsingCache ? (
+    // Show placeholder while using cache
+    <>
+      <Text style={styles.sectionTitle}>Recent Transactions</Text>
+      <View style={{ padding: 30, alignItems: 'center' }}>
+        <ActivityIndicator size="small" color="#2563eb" />
+        <Text style={{ marginTop: 12, color: '#6b7280', fontSize: 13 }}>
+          Loading transactions...
+        </Text>
+      </View>
+    </>
+  ) : (
+    // Show actual transactions once full data loaded
+    <>
+      <View style={styles.transactionHeader}>
+        <Text style={styles.sectionTitle}>Recent Transactions</Text>
+        <View style={styles.sortControls}>
+          <TouchableOpacity 
+            style={[styles.sortButton, sortBy === 'date' && styles.sortButtonActive]}
+            onPress={() => {
+              if (sortBy === 'date') {
+                setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+              } else {
+                setSortBy('date');
+                setSortOrder('desc');
+              }
+            }}
+          >
+            <Calendar size={14} color={sortBy === 'date' ? '#2563eb' : '#6b7280'} />
+            <Text style={[styles.sortButtonText, sortBy === 'date' && styles.sortButtonTextActive]}>
+              Date {sortBy === 'date' && (sortOrder === 'asc' ? '(A-Z)' : '(Z-A)')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.sortButton, sortBy === 'amount' && styles.sortButtonActive]}
+            onPress={() => {
+              if (sortBy === 'amount') {
+                setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+              } else {
+                setSortBy('amount');
+                setSortOrder('desc');
+              }
+            }}
+          >
+            <TrendingUp size={14} color={sortBy === 'amount' ? '#2563eb' : '#6b7280'} />
+            <Text style={[styles.sortButtonText, sortBy === 'amount' && styles.sortButtonTextActive]}>
+              Amount {sortBy === 'amount' && (sortOrder === 'asc' ? '(A-Z)' : '(Z-A)')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      
+      <ExpenseList
+        expenses={sortedTransactions.slice(0, transactionShowCount)}
+        onDelete={handleDeleteExpense}
+        onEdit={handleEditExpense}
+      />
 
-                    {filteredExpensesForDisplay.length > ITEMS_PER_LOAD && (
-                      <View style={styles.paginationControls}>
-                        {transactionShowCount > ITEMS_PER_LOAD && (
-                          <TouchableOpacity style={styles.collapseButton} onPress={handleCollapseTransactions}>
-                            <Text style={styles.paginationText}>Collapse</Text>
-                            <ChevronUp size={16} color="#2563eb" />
-                          </TouchableOpacity>
-                        )}
-                        {filteredExpensesForDisplay.length > transactionShowCount && (
-                           <TouchableOpacity style={styles.moreButton} onPress={handleShowMoreTransactions}>
-                            <Text style={styles.paginationText}>More ({filteredExpensesForDisplay.length - transactionShowCount} left)</Text>
-                            <ChevronDown size={16} color="#2563eb" />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    )}
-                </View>
+      {filteredExpensesForDisplay.length > ITEMS_PER_LOAD && (
+        <View style={styles.paginationControls}>
+          {transactionShowCount > ITEMS_PER_LOAD && (
+            <TouchableOpacity style={styles.collapseButton} onPress={handleCollapseTransactions}>
+              <Text style={styles.paginationText}>Collapse</Text>
+              <ChevronUp size={16} color="#2563eb" />
+            </TouchableOpacity>
+          )}
+          {filteredExpensesForDisplay.length > transactionShowCount && (
+            <TouchableOpacity style={styles.moreButton} onPress={handleShowMoreTransactions}>
+              <Text style={styles.paginationText}>More ({filteredExpensesForDisplay.length - transactionShowCount} left)</Text>
+              <ChevronDown size={16} color="#2563eb" />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </>
+  )}
+</View>
                 </>
             )
         )}

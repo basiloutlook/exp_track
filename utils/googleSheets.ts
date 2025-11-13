@@ -320,10 +320,18 @@ export async function getInsightsFromServer(since: Date | null = null): Promise<
 
     const url = `${GOOGLE_SHEET_URL}?${params.toString()}`;
     
-    const response = await fetch(url, {
+    // Create a timeout promise (10 seconds)
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Request timeout')), 10000)
+    );
+    
+    // Race between fetch and timeout
+    const fetchPromise = fetch(url, {
       method: 'GET',
       headers: { 'Cache-Control': 'no-cache' },
     });
+    
+    const response = await Promise.race([fetchPromise, timeoutPromise]);
 
     // Handle rate limiting gracefully
     if (response.status === 429) {
@@ -331,7 +339,10 @@ export async function getInsightsFromServer(since: Date | null = null): Promise<
       return [];
     }
 
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    if (!response.ok) {
+      console.warn(`⚠️ Server returned ${response.status}, skipping insights`);
+      return [];
+    }
     
     const data = await response.json();
     
@@ -352,9 +363,11 @@ export async function getInsightsFromServer(since: Date | null = null): Promise<
     console.log(`✅ Fetched ${validInsights.length} valid insights from server`);
     return validInsights;
   } catch (error) {
-    // Only log non-rate-limit errors as errors
-    if (error instanceof Error && !error.message.includes('429')) {
-      console.error('❌ Error fetching insights:', error);
+    // Don't throw - just log and return empty array
+    if (error instanceof Error && error.message === 'Request timeout') {
+      console.log('⏱️ Request timed out, skipping insights');
+    } else {
+      console.log('⚠️ Could not fetch insights (network issue), continuing:', error);
     }
     return [];
   }

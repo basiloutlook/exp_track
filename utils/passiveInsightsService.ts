@@ -29,14 +29,25 @@ async function shouldGenerateInsights(): Promise<boolean> {
  * Adds insights to chat naturally, no push notifications
  */
 export async function generatePassiveInsights(): Promise<void> {
-  const shouldGenerate = await shouldGenerateInsights();
-  
-  if (!shouldGenerate) return; // Don't spam
-  
-  const expenses = await getExpensesFromGoogleSheet();
-  const preferences = await getUserPreferences();
-  
-  const insights: ChatMessage[] = [];
+  try {
+    const shouldGenerate = await shouldGenerateInsights();
+    
+    if (!shouldGenerate) {
+      console.log('⏭️ Skipping passive insights (already generated today)');
+      return;
+    }
+    
+    // Wrap in timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Timeout')), 5000)
+    );
+    
+    const insightPromise = (async () => {
+      const expenses = await getExpensesFromGoogleSheet();
+      if (!expenses || expenses.length === 0) return;
+
+      const preferences = await getUserPreferences();
+      const insights: ChatMessage[] = [];
   
   // 1. Budget check (if user has goals)
   if (preferences.spendingGoals.length > 0) {
@@ -54,15 +65,23 @@ export async function generatePassiveInsights(): Promise<void> {
     insights.push(summary);
   }
   
-  // Save insights to chat history
   for (const insight of insights) {
-    await chatHistoryService.saveMessage(insight);
+        await chatHistoryService.saveMessage(insight);
+      }
+      
+      await AsyncStorage.setItem(STORAGE_KEY, new Date().toISOString());
+    })();
+    
+    await Promise.race([insightPromise, timeoutPromise]);
+    
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Timeout') {
+      console.warn('⏱️ Passive insights timed out, skipping');
+    } else {
+      console.error('❌ Error in generatePassiveInsights:', error);
+    }
   }
-  
-  // Update last check time
-  await AsyncStorage.setItem(STORAGE_KEY, new Date().toISOString());
 }
-
 /**
  * Check budget status - only alert if significant
  */
