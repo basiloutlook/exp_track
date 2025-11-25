@@ -65,7 +65,9 @@ export default function Chatbot() {
   const [isLoading, setIsLoading] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
-  const [apiHistory, setApiHistory] = useState<Content[]>([]);
+  // ✅ NEW - use ref to avoid re-renders
+  const apiHistoryRef = useRef<Content[]>([]);
+  const MAX_HISTORY = 50; // Keep only last 50 exchanges
   const [userContext, setUserContext] = useState<string>('');
   const [showFeedbackFor, setShowFeedbackFor] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -112,7 +114,7 @@ export default function Chatbot() {
           try {
             await chatHistoryService.clearAllMessages();
             setMessages([]);
-            setApiHistory([]);
+            apiHistoryRef.current = [];
             setOffset(0);
             setHasMore(true);
             console.log('✅ Chat history cleared');
@@ -137,20 +139,32 @@ export default function Chatbot() {
 };
 
   const loadInitialData = async () => {
-  console.log('📥 Loading initial data...');
+  console.log('🔥 Loading initial data...');
   setIsLoadingHistory(true);
   
   try {
-    // Step 1: Initialize user context first (critical foundation)
+    // ✅ Step 1: Initialize user context (non-critical - can fail)
     console.log('🔧 Initializing user context...');
-    await initializeUserContext();
+    try {
+      await initializeUserContext();
+      console.log('✅ User context initialized');
+    } catch (err) {
+      console.warn('⚠️ Failed to initialize user context (non-critical):', err);
+      // App continues - this is just for personalization
+    }
     
-    // Step 2: Build context for Gemini
-    const context = await buildConversationContext();
-    setUserContext(context);
-    console.log('✅ User context loaded');
+    // ✅ Step 2: Build context (important but not critical)
+    let context = '';
+    try {
+      context = await buildConversationContext();
+      setUserContext(context);
+      console.log('✅ User context loaded');
+    } catch (err) {
+      console.warn('⚠️ Failed to build context, using empty context:', err);
+      setUserContext(''); // Set empty context so chatbot works without personalization
+    }
     
-    // Step 3: Load expenses (wrapped in try-catch)
+    // ✅ Step 3: Load expenses (already has try-catch - good!)
     console.log('💰 Loading expenses...');
     let expenseData: Expense[] = [];
     try {
@@ -158,82 +172,76 @@ export default function Chatbot() {
       setExpenses(expenseData);
       console.log(`✅ Loaded ${expenseData.length} expenses`);
     } catch (error) {
-      console.error('⚠️ Error loading expenses, continuing with empty data:', error);
+      console.error('⚠️ Error loading expenses:', error);
+      setExpenses([]); // Empty expenses - chatbot still works
     }
 
-    // Step 4: Load chat history FIRST before syncing anything
+    // ✅ Step 4: Load chat history (MUST succeed or user sees nothing)
     console.log('💬 Loading chat history...');
-    let recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+    let recentMessages = [];
+    try {
+      recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
+    } catch (error) {
+      console.error('❌ Failed to load chat history:', error);
+      // Create emergency welcome message
+      const welcomeMessage: ChatMessage = {
+        id: Date.now().toString(),
+        text: "Hi! I'm your expense assistant. I had trouble loading your chat history, but I'm ready to help!",
+        type: 'bot',
+        timestamp: new Date(),
+      };
+      recentMessages = [welcomeMessage];
+    }
     
-    // Step 5: Only sync insights if we have existing history
+    // ✅ Step 5: Sync insights (nice-to-have, can fail silently)
     if (recentMessages.length > 0) {
-      console.log('🔄 Syncing insights from server...');
+      console.log('🔄 Syncing insights...');
       try {
         const newInsightsCount = await chatHistoryService.syncInsightsFromServer();
         if (newInsightsCount > 0) {
           console.log(`✨ ${newInsightsCount} new insight(s) added`);
-          // Reload messages after syncing
           recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
         }
       } catch (error) {
-        console.error('⚠️ Error syncing insights, continuing:', error);
+        console.warn('⚠️ Failed to sync insights (non-critical):', error);
+        // Continue without insights - not critical
       }
     }
     
-    // Step 6: Generate passive insights (only if we have expense data)
+    // ✅ Step 6: Generate insights (nice-to-have, can fail silently)
     if (expenseData.length > 0) {
       try {
         await generatePassiveInsights();
       } catch (error) {
-        console.error('⚠️ Error generating passive insights:', error);
+        console.warn('⚠️ Failed to generate insights:', error);
       }
       
-      // Step 7: Check for data-specific patterns
       try {
         const dataInsights = await checkDataSpecificPatterns(expenseData);
         for (const insight of dataInsights) {
           await chatHistoryService.saveMessage(insight);
         }
-        
-        // Reload messages after adding insights
         if (dataInsights.length > 0) {
           recentMessages = await chatHistoryService.getChatHistory(PAGE_SIZE, 0);
         }
       } catch (error) {
-        console.error('⚠️ Error checking data patterns:', error);
+        console.warn('⚠️ Failed to check data patterns:', error);
       }
     }
     
-    // Step 8: Set messages or create welcome message
-    if (recentMessages.length === 0) {
-      const prefs = await getUserPreferences();
-      const tone = prefs.preferredTone === 'professional' ? 
-        "Hello! I'm your expense assistant." :
-        "Hi! I'm your expense assistant 👋";
-      
-      const welcomeMessage: ChatMessage = {
-        id: Date.now().toString(),
-        text: `${tone} I analyze your spending patterns and provide smart insights. I'll learn from our conversations to give you better advice. Ask me anything!`,
-        type: 'bot',
-        timestamp: new Date(),
-      };
-      
-      await chatHistoryService.saveMessage(welcomeMessage);
-      setMessages([welcomeMessage]);
-      console.log('👋 Welcome message created');
-    } else {
-      setMessages(recentMessages);
-      setOffset(PAGE_SIZE);
-      console.log(`✅ Loaded ${recentMessages.length} messages`);
-    }
+    // ✅ Finally set messages (guaranteed to have at least welcome message)
+    setMessages(recentMessages);
+    setOffset(PAGE_SIZE);
+    console.log(`✅ Loaded ${recentMessages.length} messages`);
     
   } catch (error) {
-    console.error('❌ Critical error loading initial data:', error);
+    // This outer catch should NEVER be reached now
+    // But just in case, create emergency fallback
+    console.error('❌ CRITICAL: Outer error caught:', error);
     
-    // Create emergency fallback message
     const errorMessage: ChatMessage = {
       id: Date.now().toString(),
-      text: "Hi! I'm your expense assistant. I had trouble loading some data, but I'm ready to help. What would you like to know?",
+      text: "Hi! I'm your expense assistant. Something went wrong during startup, but I'm here to help. Try asking me a question!",
       type: 'bot',
       timestamp: new Date(),
     };
@@ -313,11 +321,11 @@ export default function Chatbot() {
       // Call chatbot with context
       const { newHistory, responseText } = await getChatbotResponse(
         text, 
-        apiHistory,
+        apiHistoryRef.current, // Use ref
         userContext
       );
 
-      setApiHistory(newHistory);
+      apiHistoryRef.current = newHistory.slice(-MAX_HISTORY);
 
       const botMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),

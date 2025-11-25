@@ -1,11 +1,6 @@
 // utils/storage.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Expense } from "@/types/expense";
-import {
-  addExpenseToGoogleSheet,
-  updateExpenseInGoogleSheet,
-  deleteExpenseFromGoogleSheet,
-} from "./googleSheets";
 
 const STORAGE_KEYS = {
   EXPENSES: "expenses",
@@ -20,6 +15,8 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 let inMemoryCache: Expense[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// ✅ ADD THIS LINE
+let loadingPromise: Promise<Expense[]> | null = null;
 async function saveData<T>(key: string, data: T): Promise<void> {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(data));
@@ -48,37 +45,48 @@ export const storageService = {
     await saveData(STORAGE_KEYS.USER, { email });
   },
 
-  // 🔹 REPLACE THIS METHOD COMPLETELY
- async getExpenses(): Promise<Expense[]> {
-  // Check if in-memory cache is valid
+  async getExpenses(): Promise<Expense[]> {
+  // If already loading, return the same promise (mutex lock)
+  if (loadingPromise) {
+    console.log('⏳ Waiting for existing load...');
+    return loadingPromise;
+  }
+
+  // Check in-memory cache first
   if (inMemoryCache && (Date.now() - cacheTimestamp < CACHE_TTL)) {
     console.log('📦 Using in-memory cache');
-    return [...inMemoryCache]; // Return copy to prevent mutations
+    return [...inMemoryCache];
   }
 
-  // Try AsyncStorage cache first
-  const cached = await this.getCachedExpensesWithTimestamp();
-  if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
-    console.log('💾 Using AsyncStorage cache');
-    inMemoryCache = cached.expenses;
-    cacheTimestamp = Date.now();
-    return cached.expenses;
-  }
+  // Start loading with lock
+  loadingPromise = (async () => {
+    try {
+      // Try AsyncStorage cache
+      const asyncCache = await this.getCachedExpensesWithTimestamp();
+      if (asyncCache && (Date.now() - asyncCache.timestamp < CACHE_DURATION)) {
+        console.log('💾 Using AsyncStorage cache');
+        inMemoryCache = asyncCache.expenses;
+        cacheTimestamp = Date.now();
+        return asyncCache.expenses;
+      }
 
-  // Fallback to direct load (for backward compatibility)
-  const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES) || [];
-  
-  // Update both caches
-  inMemoryCache = expenses;
-  cacheTimestamp = Date.now();
-  await this.setCachedExpenses(expenses);
-  
-  return expenses;
+      // Load from storage
+      const expenses = await loadData<Expense[]>(STORAGE_KEYS.EXPENSES) || [];
+      
+      // Update both caches
+      inMemoryCache = expenses;
+      cacheTimestamp = Date.now();
+      await this.setCachedExpenses(expenses);
+      
+      return expenses;
+    } finally {
+      // Always unlock
+      loadingPromise = null;
+    }
+  })();
+
+  return loadingPromise;
 },
-
-  // 🔹 FIND: async setExpenses(expenses: Expense[]): Promise<void> {
-// REPLACE with:
-
 async setExpenses(expenses: Expense[]): Promise<void> {
   await saveData(STORAGE_KEYS.EXPENSES, expenses);
   // Update cache when expenses are set
@@ -171,6 +179,7 @@ async updateExpenseOnly(expense: Expense): Promise<void> {
     const index = inMemoryCache.findIndex(e => e.id === expense.id);
     if (index !== -1) {
       inMemoryCache[index] = expense;
+      cacheTimestamp = Date.now();
     }
   }
 
@@ -186,30 +195,7 @@ async updateExpenseOnly(expense: Expense): Promise<void> {
 },
 
   // DEPRECATED: This was causing duplicates. Use addExpenseOnly or updateExpenseOnly instead
-  async saveExpense(expense: Expense): Promise<void> {
-    try {
-      let expenses = (await loadData<Expense[]>(STORAGE_KEYS.EXPENSES)) || [];
-
-      // Ensure ID exists
-      if (!expense.id) {
-        expense.id = Date.now().toString();
-      }
-
-      const idx = expenses.findIndex((e) => e.id === expense.id);
-      if (idx >= 0) {
-        expenses[idx] = expense;
-        await updateExpenseInGoogleSheet(expense);
-      } else {
-        expenses.push(expense);
-        await addExpenseToGoogleSheet(expense);
-      }
-
-      await saveData(STORAGE_KEYS.EXPENSES, expenses);
-      console.log("✅ Expense saved locally and synced to sheet");
-    } catch (error) {
-      console.error("❌ Error saving expense:", error);
-    }
-  },
+  
 
   // Keep for backward compatibility but update locally only
   async updateExpense(updated: Expense): Promise<void> {

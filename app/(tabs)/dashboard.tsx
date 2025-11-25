@@ -448,6 +448,13 @@ sidebarSafeArea: {
   },
 });
 
+// ✅ Add this helper function BEFORE the Dashboard component
+const safePercentageChange = (current: number, previous: number): number => {
+  if (previous === 0) {
+    return current > 0 ? 100 : 0; // If previous was 0 and now have data, show 100% increase
+  }
+  return ((current - previous) / previous) * 100;
+};
 
 const getDefaultStartDate = () => {
     const now = new Date();
@@ -478,24 +485,26 @@ const ComparisonCard = ({ item, onPress }: { item: QuarterData; onPress?: (item:
     const isIncrease = item.valueChange > 0;
     const percentageChange = hasPriorData ? (item.valueChange / (item.value - item.valueChange)) * 100 : 0;
 
-    const color = hasPriorData
+    // ✅ NEW: Separate color string and style object
+    const colorHex = hasPriorData
+        ? (isIncrease ? '#ef4444' : '#10b981')
+        : '#9ca3af';
+    
+    const colorStyle = hasPriorData
         ? (isIncrease ? styles.redText : styles.greenText)
         : styles.grayText;
+    
     const ArrowIcon = isIncrease ? ArrowUp : ArrowDown;
     const percentage = Math.abs(percentageChange).toFixed(0);
 
     return (
-        <TouchableOpacity
-            style={styles.comparisonCard}
-            onPress={() => onPress?.(item)}
-            disabled={!onPress}
-        >
+        <TouchableOpacity style={styles.comparisonCard} onPress={() => onPress?.(item)}>
             <View style={styles.comparisonCardHeader}>
                 <Text style={styles.comparisonLabel}>{item.label}</Text>
                 {hasPriorData && (
                     <View style={styles.comparisonBadge}>
-                        <ArrowIcon size={10} color={color.color} />
-                        <Text style={[styles.comparisonText, color]}>{percentage}%</Text>
+                        <ArrowIcon size={10} color={colorHex} /> {/* ✅ Direct string */}
+                        <Text style={[styles.comparisonText, colorStyle]}>{percentage}%</Text>
                     </View>
                 )}
             </View>
@@ -779,9 +788,16 @@ const MovingAverageCard = ({ title, maValue, comparison }: {
     }
 }) => {
     const { percentageChange, isIncrease, hasPriorData } = comparison;
-    const color = hasPriorData
+    
+    // ✅ NEW: Separate icon color from text style
+    const iconColor = hasPriorData
+        ? (isIncrease ? '#ef4444' : '#10b981')
+        : '#9ca3af';
+    
+    const textStyle = hasPriorData
         ? (isIncrease ? styles.redText : styles.greenText)
         : styles.grayText;
+    
     const ArrowIcon = isIncrease ? ArrowUp : ArrowDown;
     const percentage = Math.abs(percentageChange).toFixed(0);
 
@@ -789,8 +805,8 @@ const MovingAverageCard = ({ title, maValue, comparison }: {
         <View style={styles.maCard}>
             {hasPriorData && (
                 <View style={styles.maComparison}>
-                    <ArrowIcon size={12} color={color.color} />
-                    <Text style={[styles.maComparisonText, color]}>{percentage}%</Text>
+                    <ArrowIcon size={12} color={iconColor} /> {/* ✅ Direct string */}
+                    <Text style={[styles.maComparisonText, textStyle]}>{percentage}%</Text>
                 </View>
             )}
             <Text style={styles.maValue}>₹{maValue.toFixed(0)}</Text>
@@ -798,7 +814,6 @@ const MovingAverageCard = ({ title, maValue, comparison }: {
         </View>
     );
 };
-
 const ITEMS_PER_LOAD = 5;
 
 type SortBy = 'date' | 'amount';
@@ -1695,9 +1710,8 @@ return (
                     <Text style={styles.sectionTitle}>Quarterly Expenses (Past Year)</Text>
                     <View style={styles.expensesList}>
                       {quarterlyData.map((quarter, index) => {
-                        const percentageChange = quarter.valueChange !== 0
-                          ? (quarter.valueChange / (quarter.value - quarter.valueChange)) * 100
-                          : 0;
+                        const previousValue = quarter.value - quarter.valueChange;
+                        const percentageChange = safePercentageChange(quarter.value, previousValue);
 
                         return (
                           <TouchableOpacity 

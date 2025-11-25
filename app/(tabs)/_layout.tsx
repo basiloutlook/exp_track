@@ -1,6 +1,5 @@
-// app/(tabs)/_layout.tsx
 import { Tabs } from "expo-router";
-import { PlusCircle, BarChart3, MessageSquare } from "lucide-react-native"; // 👈 Add icon
+import { PlusCircle, BarChart3, MessageSquare } from "lucide-react-native";
 
 export default function TabLayout() {
   return (
@@ -14,6 +13,8 @@ export default function TabLayout() {
           borderTopColor: "#e5e7eb",
           paddingBottom: 0,
         },
+        // ✅ Only use 'lazy' - remove 'unmountOnBlur'
+        lazy: true,
       }}
     >
       <Tabs.Screen
@@ -36,7 +37,6 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 👇 New chatbot tab */}
       <Tabs.Screen
         name="chatbot"
         options={{

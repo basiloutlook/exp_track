@@ -321,8 +321,10 @@ export async function getInsightsFromServer(since: Date | null = null): Promise<
     const url = `${GOOGLE_SHEET_URL}?${params.toString()}`;
     
     // Create a timeout promise (10 seconds)
+    // ✅ New code with conditional timeout
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Request timeout')), 10000)
+      setTimeout(() => reject(new Error('Request timeout')), 
+        __DEV__ ? 10000 : 30000) // 30s for production builds
     );
     
     // Race between fetch and timeout
